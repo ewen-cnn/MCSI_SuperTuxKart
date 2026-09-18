@@ -427,3 +427,8 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# --- Python : environnements virtuels (689 Mo ici) ---
+.venv/
+venv/
+env/
