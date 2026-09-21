@@ -71,7 +71,7 @@ INVERT_ACC_Y = True
 DEAD_ZONE_X = 0.20
 DEAD_ZONE_Y = 0.20
 
-TOUCH_TIMEOUT  = 0.05   # sans message pad pendant ce delai -> doigt leve
+TOUCH_TIMEOUT  = 0.40   # sans message pad pendant ce delai -> doigt leve
 SENSOR_TIMEOUT = 0.50   # sans message d'un capteur -> capteur eteint
 
 # --- Source de la direction -------------------------------------------------
@@ -95,8 +95,8 @@ JOYSTICK_RADIUS = 0.50  # deplacement (en unites pad) pour atteindre le maximum
 FIRE_HOLD        = 0.12     # maintien de la touche espace (s)
 RESCUE_HOLD      = 0.12     # maintien de la touche retour arriere (s)
 NITRO_HOLD       = 0.12     # maintien de la touche nitro (s)
-TAP_MIN_DURATION = 0.08     # en dessous, c'est un rebond du pad, pas un tap
-TAP_MAX_DURATION = 0.40     # au-dela, c'est un appui maintenu, pas un tap
+TAP_MIN_DURATION = 0.03     # en dessous, c'est un rebond du pad, pas un tap
+TAP_MAX_DURATION = 0.25     # au-dela, c'est un appui maintenu, pas un tap
 DOUBLE_TAP_DELAY = 0.30     # ecart maxi entre les deux taps
 
 # --- secousse autour de X -> RESCUE -----------------------------
@@ -124,7 +124,7 @@ MOTION_TOLERANCE = 3.00
 # commande en rafale en dosant le rapport cyclique. Sur une periode :
 #     t1 = intensite * CONTINUOUS_PERIOD        -> touche enfoncee
 #     t2 = (1 - intensite) * CONTINUOUS_PERIOD  -> touche relachee
-CONTINUOUS_PERIOD = 0.04   # duree d'un cycle pressed + released (s)
+CONTINUOUS_PERIOD = 0.05   # duree d'un cycle pressed + released (s)
 SKID_KICKOFF = 0.15 
 SKID_INTO_MAX = 0.7     # braquage maxi DANS le sens du virage pendant la glisse
 LOOP_HZ = 120       # frequence de la boucle principale
@@ -245,25 +245,31 @@ class PadState:
         self._lock = threading.Lock()
         self._x = None
         self._y = None
+        self._pressed = False
         self._last_update = 0.0
 
     def set_x(self, value):
         with self._lock:
             self._x = value
+            self._pressed = True          # un message x ou y = le doigt est pose
             self._last_update = time.time()
 
     def set_y(self, value):
         with self._lock:
-            self._y = value
+            self._x = value
+            self._pressed = True          # un message x ou y = le doigt est pose
             self._last_update = time.time()
 
+    def set_touch_up(self):
+        with self._lock:
+            self._pressed = False         # annonce explicite du lever
+
     def snapshot(self):
-        """Retourne (x, y, age du dernier message recu)."""
+        """Retourne (x, y, pressed, age du dernier message)."""
         with self._lock:
             if self._x is None or self._y is None:
-                return None, None, float('inf')
-            return self._x, self._y, time.time() - self._last_update
-
+                return None, None, False, float('inf')
+            return self._x, self._y, self._pressed, time.time() - self._last_update
 
 class Vector3State:
 
@@ -605,6 +611,7 @@ def bind_all(osc, pad, acc, gyr, camera):
     """Associe les messages OSC de MultiSense Osc aux trois etats."""
     osc.bind(b'/multisense/pad/x', lambda *values: pad.set_x(values[0]))
     osc.bind(b'/multisense/pad/y', lambda *values: pad.set_y(values[0]))
+    osc.bind(b'/multisense/pad/touchUP', lambda *values: pad.set_touch_up())
 
     osc.bind(b'/multisense/accelerometer/x', lambda *values: acc.set_x(values[0]))
     osc.bind(b'/multisense/accelerometer/y', lambda *values: acc.set_y(values[0]))
@@ -726,12 +733,12 @@ def main():
     try:
         while True:
             now = time.time()
-            px, py, page = pad.snapshot()
+            px, py, pressed, page = pad.snapshot()
             ax, ay, az, aage = acc.snapshot()
             gx, gy, gz, gage = gyr.snapshot()
             cx, cy, cz, cage = camera.snapshot() #Données liées à la caméra
 
-            touching = px is not None and page <= TOUCH_TIMEOUT
+            touching = pressed and page <= TOUCH_TIMEOUT
             acc_ok   = ax is not None and aage <= SENSOR_TIMEOUT
             gyr_ok   = gx is not None and gage <= SENSOR_TIMEOUT
             camera_ok = cx is not None and cage <= SENSOR_TIMEOUT

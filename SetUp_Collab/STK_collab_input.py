@@ -11,8 +11,7 @@ from collections import deque
 from oscpy.server import OSCThreadServer
 
 
-from vibrationSensor import vibrationSensor
-from MuscleSensor import MuscleSensor
+from sensorStates import vibrationSensor, MuscleSensor
 ###############################################################################
 ## Global vars
 GREEN   = '\033[92m'
@@ -35,7 +34,7 @@ CAPTEURS = { 'vibrationSensor', 'MuscleSensor' }
 def main():
     vs= vibrationSensor()
     ms= MuscleSensor()
-    
+
     debug = '-d' in sys.argv or '--debug' in sys.argv
     # --- MultiSense Serial ----------------------------------------------------
     serialPort = serial.Serial(SERIAL_PORT, BAUDRATE, TIMEOUT, debug=debug)
@@ -48,6 +47,19 @@ def main():
         if not sep:
             return None, None
         return nom.strip(), valeur.strip()    
+    elif nom == 'vibrationSensor':
+        if valeur == 1:
+            if vs.state == 1:
+                print("Double vibration detected")
+                return None
+            else :
+                vs.state == 1
+                print("Nouvelle vibration detected")
+            
+                
+        else:
+            print("No vibration detected")
 
-
+    elif nom == 'MuscleSensor':
+        ms.state1, ms.state2 = map(int, valeur.split(','))
     serial.close()
