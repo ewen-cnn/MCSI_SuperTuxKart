@@ -45,10 +45,11 @@ def main():
                 actions.add("BRAKE")
             if gestures["rescue"]:
                 actions.add("RESCUE")
-            if gestures["steer"] == "LEFT":
-                actions.add("LEFT")
-            elif gestures["steer"] == "RIGHT":
-                actions.add("RIGHT")
+            if gestures["steer_active"]:
+                if gestures["steer"] == "LEFT":
+                    actions.add("LEFT")
+                elif gestures["steer"] == "RIGHT":
+                    actions.add("RIGHT")
 
             client.update(actions)
 
@@ -56,15 +57,24 @@ def main():
             tracker.draw_player(frame, p2, COLOR_P2, "P2")
 
             h, w, _ = frame.shape
-            cx = int(detector.neutral_center_x * w)
-            cv2.line(frame, (cx, 0), (cx, h), (100, 100, 100), 1)
-            dz_px = int(detector.steer_deadzone * w)
-            cv2.line(frame, (cx - dz_px, 0), (cx - dz_px, h), (70, 70, 70), 1)
-            cv2.line(frame, (cx + dz_px, 0), (cx + dz_px, h), (70, 70, 70), 1)
 
-            if gestures["mid_x"] is not None:
-                mx = int(gestures["mid_x"] * w)
-                cv2.circle(frame, (mx, h - 35), 8, (0, 255, 255), -1)
+            # Draw P1 neutral line and deadzone
+            p1_cx = int(detector.p1_neutral_x * w)
+            cv2.line(frame, (p1_cx, 0), (p1_cx, h), (100, 100, 100), 1)
+            p1_dz_px = int((detector.p1_neutral_x - detector.steer_deadzone) * w)
+            cv2.line(frame, (p1_dz_px, 0), (p1_dz_px, h), (70, 70, 70), 1)
+
+            # Draw P2 neutral line and deadzone
+            p2_cx = int(detector.p2_neutral_x * w)
+            cv2.line(frame, (p2_cx, 0), (p2_cx, h), (100, 100, 100), 1)
+            p2_dz_px = int((detector.p2_neutral_x + detector.steer_deadzone) * w)
+            cv2.line(frame, (p2_dz_px, 0), (p2_dz_px, h), (70, 70, 70), 1)
+
+            # Draw outer 100% full-lock boundaries
+            left_max_px = int(detector.steer_margin * w)
+            right_max_px = int((1.0 - detector.steer_margin) * w)
+            cv2.line(frame, (left_max_px, 0), (left_max_px, h), (40, 40, 120), 1)
+            cv2.line(frame, (right_max_px, 0), (right_max_px, h), (40, 40, 120), 1)
 
             now = time.time()
             dt = now - prev
@@ -73,25 +83,38 @@ def main():
                 fps = 0.9 * fps + 0.1 * (1.0 / dt) if fps > 0 else 1.0 / dt
 
             cv2.putText(frame, f"FPS: {fps:.1f}", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-            steer_lbl = f"STEER: {gestures['steer'] or 'CENTER'}"
-            cv2.putText(frame, steer_lbl, (20, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
-                        (0, 255, 0) if gestures["steer"] else (180, 180, 180), 2)
+
+            # Individual player steering power
+            p1_pct = int(gestures["p1_power"] * 100)
+            p2_pct = int(gestures["p2_power"] * 100)
+            cv2.putText(frame, f"P1 Left: {p1_pct}%", (20, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, COLOR_P1, 2)
+            cv2.putText(frame, f"P2 Right: {p2_pct}%", (w - 230, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, COLOR_P2, 2)
+
+            # Central Net Steering
+            if gestures["steer"]:
+                net_pct = int(gestures["steer_intensity"] * 100)
+                active_str = "●" if gestures["steer_active"] else "○"
+                col = (0, 255, 0) if gestures["steer_active"] else (120, 200, 120)
+                text = f"NET: {gestures['steer']} {net_pct}% {active_str}"
+                cv2.putText(frame, text, (w // 2 - 120, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.75, col, 2)
+            else:
+                cv2.putText(frame, "NET: STRAIGHT", (w // 2 - 90, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (180, 180, 180), 2)
 
             accel_col = (0, 255, 0) if "ACCELERATE" in actions else (80, 80, 80)
-            cv2.putText(frame, "ACCEL", (20, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.65, accel_col, 2)
+            cv2.putText(frame, "ACCEL", (20, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.65, accel_col, 2)
 
             brake_col = (0, 0, 255) if "BRAKE" in actions else (80, 80, 80)
-            cv2.putText(frame, "BRAKE", (20, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.65, brake_col, 2)
+            cv2.putText(frame, "BRAKE", (20, 125), cv2.FONT_HERSHEY_SIMPLEX, 0.65, brake_col, 2)
 
             rescue_col = (0, 165, 255) if "RESCUE" in actions else (80, 80, 80)
-            cv2.putText(frame, "RESCUE", (20, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.65, rescue_col, 2)
+            cv2.putText(frame, "RESCUE", (20, 155), cv2.FONT_HERSHEY_SIMPLEX, 0.65, rescue_col, 2)
 
             if gestures["t_pose_progress"] > 0:
                 prog = int(gestures["t_pose_progress"] * 100)
-                cv2.putText(frame, f"CALIBRATING: {prog}%", (20, 180),
+                cv2.putText(frame, f"CALIBRATING: {prog}%", (w // 2 - 100, 80),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
             elif detector.calibrated:
-                cv2.putText(frame, "CALIBRATED ('c' to reset)", (20, 180),
+                cv2.putText(frame, "CALIBRATED ('c' to reset)", (w // 2 - 120, 80),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
             cv2.imshow("SuperTuxKart Vision Controller", frame)
