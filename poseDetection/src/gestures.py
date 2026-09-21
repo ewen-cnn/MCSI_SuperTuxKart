@@ -113,34 +113,34 @@ class DuoGestureDetector:
         else:
             self.t_pose_counter = max(0, self.t_pose_counter - 1)
 
+        left_thresh = self.p1_neutral_x - self.steer_deadzone
+        right_thresh = self.p2_neutral_x + self.steer_deadzone
+
         p1_left_power = 0.0
         if p1_hip:
-            dx1 = self.p1_neutral_x - p1_hip[0]
-            if dx1 > self.steer_deadzone:
-                travel1 = (self.p1_neutral_x - self.steer_deadzone) - self.steer_margin
+            if p1_hip[0] < left_thresh:
+                travel1 = left_thresh - self.steer_margin
                 if travel1 > 0:
-                    p1_left_power = min(1.0, max(0.0, (dx1 - self.steer_deadzone) / travel1))
+                    p1_left_power = min(1.0, max(0.0, (left_thresh - p1_hip[0]) / travel1))
 
         p2_right_power = 0.0
         if p2_hip:
-            dx2 = p2_hip[0] - self.p2_neutral_x
-            if dx2 > self.steer_deadzone:
-                travel2 = (1.0 - self.steer_margin) - (self.p2_neutral_x + self.steer_deadzone)
+            if p2_hip[0] > right_thresh:
+                travel2 = (1.0 - self.steer_margin) - right_thresh
                 if travel2 > 0:
-                    p2_right_power = min(1.0, max(0.0, (dx2 - self.steer_deadzone) / travel2))
+                    p2_right_power = min(1.0, max(0.0, (p2_hip[0] - right_thresh) / travel2))
 
+        # Solo fallback if playing alone
         if p1_hip and not p2_hip:
-            dx1_right = p1_hip[0] - self.p1_neutral_x
-            if dx1_right > self.steer_deadzone:
+            if p1_hip[0] > (self.p1_neutral_x + self.steer_deadzone):
                 travel = (1.0 - self.steer_margin) - (self.p1_neutral_x + self.steer_deadzone)
                 if travel > 0:
-                    p2_right_power = min(1.0, max(0.0, (dx1_right - self.steer_deadzone) / travel))
+                    p2_right_power = min(1.0, max(0.0, (p1_hip[0] - (self.p1_neutral_x + self.steer_deadzone)) / travel))
         elif p2_hip and not p1_hip:
-            dx2_left = self.p2_neutral_x - p2_hip[0]
-            if dx2_left > self.steer_deadzone:
+            if p2_hip[0] < (self.p2_neutral_x - self.steer_deadzone):
                 travel = (self.p2_neutral_x - self.steer_deadzone) - self.steer_margin
                 if travel > 0:
-                    p1_left_power = min(1.0, max(0.0, (dx2_left - self.steer_deadzone) / travel))
+                    p1_left_power = min(1.0, max(0.0, ((self.p2_neutral_x - self.steer_deadzone) - p2_hip[0]) / travel))
 
         net = p1_left_power - p2_right_power
         steer = None
@@ -161,23 +161,27 @@ class DuoGestureDetector:
         else:
             steer_active = False
 
-        # Toggle acceleration (cruise control) on hand raise edge
         hands_up = self._hands_up(p1_landmarks) or self._hands_up(p2_landmarks)
         if hands_up and not self.prev_hands_up:
             self.cruise_control = not self.cruise_control
         self.prev_hands_up = hands_up
 
-        brake = False
+        p1_brake_y = (self.p1_standing_y + self.crouch_threshold) if self.p1_standing_y is not None else 0.58
+        p2_brake_y = (self.p2_standing_y + self.crouch_threshold) if self.p2_standing_y is not None else 0.58
+
+        p1_brake = False
+        p2_brake = False
         rescue = False
 
         if p1_hip:
             if self.p1_standing_y is None or p1_hip[1] < self.p1_standing_y:
                 self.p1_standing_y = p1_hip[1]
+                p1_brake_y = self.p1_standing_y + self.crouch_threshold
             else:
                 self.p1_standing_y += 0.001
 
-            if p1_hip[1] > self.p1_standing_y + self.crouch_threshold:
-                brake = True
+            if p1_hip[1] > p1_brake_y:
+                p1_brake = True
 
             if self.p1_prev_y is not None and (self.p1_prev_y - p1_hip[1]) > self.jump_velocity:
                 rescue = True
@@ -188,11 +192,12 @@ class DuoGestureDetector:
         if p2_hip:
             if self.p2_standing_y is None or p2_hip[1] < self.p2_standing_y:
                 self.p2_standing_y = p2_hip[1]
+                p2_brake_y = self.p2_standing_y + self.crouch_threshold
             else:
                 self.p2_standing_y += 0.001
 
-            if p2_hip[1] > self.p2_standing_y + self.crouch_threshold:
-                brake = True
+            if p2_hip[1] > p2_brake_y:
+                p2_brake = True
 
             if self.p2_prev_y is not None and (self.p2_prev_y - p2_hip[1]) > self.jump_velocity:
                 rescue = True
@@ -200,7 +205,7 @@ class DuoGestureDetector:
         else:
             self.p2_prev_y = None
 
-        # Acceleration drives if cruise control is on and not actively braking
+        brake = p1_brake or p2_brake
         accelerate = self.cruise_control and not brake
 
         return {
@@ -213,8 +218,14 @@ class DuoGestureDetector:
             "cruise_control": self.cruise_control,
             "brake": brake,
             "rescue": rescue,
-            "p1_neutral_x": self.p1_neutral_x,
-            "p2_neutral_x": self.p2_neutral_x,
+            "p1_hip": p1_hip,
+            "p2_hip": p2_hip,
+            "p1_brake": p1_brake,
+            "p2_brake": p2_brake,
+            "p1_brake_y": p1_brake_y,
+            "p2_brake_y": p2_brake_y,
+            "left_thresh": left_thresh,
+            "right_thresh": right_thresh,
             "calibrated": self.calibrated,
             "just_calibrated": just_calibrated,
             "t_pose_progress": min(1.0, self.t_pose_counter / 30.0),
@@ -245,54 +256,79 @@ def main():
 
         h, w, _ = frame.shape
 
-        p1_cx = int(detector.p1_neutral_x * w)
-        cv2.line(frame, (p1_cx, 0), (p1_cx, h), (100, 100, 100), 1)
-        p1_dz_px = int((detector.p1_neutral_x - detector.steer_deadzone) * w)
-        cv2.line(frame, (p1_dz_px, 0), (p1_dz_px, h), (70, 70, 70), 1)
+        # Vertical action boundary lines & Neutral Zone
+        lx = int(gestures["left_thresh"] * w)
+        rx = int(gestures["right_thresh"] * w)
+        cv2.line(frame, (lx, 0), (lx, h), (120, 120, 120), 1)
+        cv2.line(frame, (rx, 0), (rx, h), (120, 120, 120), 1)
 
-        p2_cx = int(detector.p2_neutral_x * w)
-        cv2.line(frame, (p2_cx, 0), (p2_cx, h), (100, 100, 100), 1)
-        p2_dz_px = int((detector.p2_neutral_x + detector.steer_deadzone) * w)
-        cv2.line(frame, (p2_dz_px, 0), (p2_dz_px, h), (70, 70, 70), 1)
+        nz_mid = (lx + rx) // 2
+        cv2.putText(frame, "NEUTRAL ZONE", (nz_mid - 65, h - 20),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (160, 160, 160), 1)
 
+        # Full-lock margin lines
         left_max_px = int(detector.steer_margin * w)
         right_max_px = int((1.0 - detector.steer_margin) * w)
         cv2.line(frame, (left_max_px, 0), (left_max_px, h), (40, 40, 120), 1)
         cv2.line(frame, (right_max_px, 0), (right_max_px, h), (40, 40, 120), 1)
 
+        # Hip points & horizontal brake lines
+        if gestures["p1_hip"]:
+            hx, hy = gestures["p1_hip"]
+            h_px = (int(hx * w), int(hy * w if hy * w < h else hy * h))
+            h_px = (int(hx * w), int(hy * h))
+            col = (0, 0, 255) if gestures["p1_brake"] else (0, 255, 255)
+            cv2.circle(frame, h_px, 7, col, -1)
+
+            b_y = int(gestures["p1_brake_y"] * h)
+            b_col = (0, 0, 255) if gestures["p1_brake"] else (80, 80, 80)
+            cv2.line(frame, (0, b_y), (w // 2, b_y), b_col, 1)
+            cv2.putText(frame, "P1 BRAKE", (10, b_y - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.4, b_col, 1)
+
+        if gestures["p2_hip"]:
+            hx, hy = gestures["p2_hip"]
+            h_px = (int(hx * w), int(hy * h))
+            col = (0, 0, 255) if gestures["p2_brake"] else (255, 0, 255)
+            cv2.circle(frame, h_px, 7, col, -1)
+
+            b_y = int(gestures["p2_brake_y"] * h)
+            b_col = (0, 0, 255) if gestures["p2_brake"] else (80, 80, 80)
+            cv2.line(frame, (w // 2, b_y), (w, b_y), b_col, 1)
+            cv2.putText(frame, "P2 BRAKE", (w - 90, b_y - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.4, b_col, 1)
+
         p1_pct = int(gestures["p1_power"] * 100)
         p2_pct = int(gestures["p2_power"] * 100)
-        cv2.putText(frame, f"P1 Left: {p1_pct}%", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, COLOR_P1, 2)
-        cv2.putText(frame, f"P2 Right: {p2_pct}%", (w - 230, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, COLOR_P2, 2)
+        cv2.putText(frame, f"P1 Left: {p1_pct}%", (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.65, COLOR_P1, 2)
+        cv2.putText(frame, f"P2 Right: {p2_pct}%", (w - 200, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.65, COLOR_P2, 2)
 
         if gestures["steer"]:
             net_pct = int(gestures["steer_intensity"] * 100)
             active_str = "●" if gestures["steer_active"] else "○"
             col = (0, 255, 0) if gestures["steer_active"] else (120, 200, 120)
             text = f"NET: {gestures['steer']} {net_pct}% {active_str}"
-            cv2.putText(frame, text, (w // 2 - 120, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.75, col, 2)
+            cv2.putText(frame, text, (w // 2 - 110, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.7, col, 2)
         else:
-            cv2.putText(frame, "NET: STRAIGHT", (w // 2 - 90, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (180, 180, 180), 2)
+            cv2.putText(frame, "NET: STRAIGHT", (w // 2 - 80, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (180, 180, 180), 2)
 
         if gestures["accelerate"]:
-            cv2.putText(frame, "ACCEL: ON [CRUISE]", (20, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            cv2.putText(frame, "ACCEL: ON [CRUISE]", (20, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
         elif gestures["cruise_control"] and gestures["brake"]:
-            cv2.putText(frame, "ACCEL: PAUSED (BRAKE)", (20, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 165, 255), 2)
+            cv2.putText(frame, "ACCEL: PAUSED (BRAKE)", (20, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
         else:
-            cv2.putText(frame, "ACCEL: OFF [Raise Hand]", (20, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (80, 80, 80), 2)
+            cv2.putText(frame, "ACCEL: OFF [Raise Hand]", (20, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (80, 80, 80), 2)
 
-        cv2.putText(frame, "BRAKE", (20, 110), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+        cv2.putText(frame, "BRAKE", (20, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
                     (0, 0, 255) if gestures["brake"] else (80, 80, 80), 2)
-        cv2.putText(frame, "RESCUE", (20, 145), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+        cv2.putText(frame, "RESCUE", (20, 125), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
                     (0, 165, 255) if gestures["rescue"] else (80, 80, 80), 2)
 
         if gestures["t_pose_progress"] > 0:
             prog = int(gestures["t_pose_progress"] * 100)
-            cv2.putText(frame, f"CALIBRATING: {prog}%", (w // 2 - 100, 80),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+            cv2.putText(frame, f"CALIBRATING: {prog}%", (w // 2 - 90, 70),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2)
         elif detector.calibrated:
-            cv2.putText(frame, "CALIBRATED ('c' to reset)", (w // 2 - 120, 80),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+            cv2.putText(frame, "CALIBRATED ('c' to reset)", (w // 2 - 100, 70),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 1)
 
         cv2.imshow("Gestures Test", frame)
         key = cv2.waitKey(1) & 0xFF
