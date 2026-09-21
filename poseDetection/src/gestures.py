@@ -174,11 +174,9 @@ class DuoGestureDetector:
         rescue = False
 
         if p1_hip:
-            if self.p1_standing_y is None or p1_hip[1] < self.p1_standing_y:
+            if self.p1_standing_y is None:
                 self.p1_standing_y = p1_hip[1]
                 p1_brake_y = self.p1_standing_y + self.crouch_threshold
-            else:
-                self.p1_standing_y += 0.001
 
             if p1_hip[1] > p1_brake_y:
                 p1_brake = True
@@ -190,11 +188,9 @@ class DuoGestureDetector:
             self.p1_prev_y = None
 
         if p2_hip:
-            if self.p2_standing_y is None or p2_hip[1] < self.p2_standing_y:
+            if self.p2_standing_y is None:
                 self.p2_standing_y = p2_hip[1]
                 p2_brake_y = self.p2_standing_y + self.crouch_threshold
-            else:
-                self.p2_standing_y += 0.001
 
             if p2_hip[1] > p2_brake_y:
                 p2_brake = True
