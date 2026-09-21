@@ -1,8 +1,13 @@
 import socket
 
+try:
+    from poseDetection.src.config import UDP_HOST, UDP_PORT
+except ImportError:
+    from config import UDP_HOST, UDP_PORT
+
 
 class STKClient:
-    def __init__(self, host="localhost", port=6006):
+    def __init__(self, host: str = UDP_HOST, port: int = UDP_PORT):
         self.address = (host, port)
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.active_actions = set()
