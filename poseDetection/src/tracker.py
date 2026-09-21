@@ -10,6 +10,7 @@ try:
     from poseDetection.src.capture import Camera
     from poseDetection.src.config import (
         NUM_POSES,
+        MIN_PLAYER_SIZE,
         MIN_DETECTION_CONFIDENCE,
         MIN_TRACKING_CONFIDENCE,
     )
@@ -17,6 +18,7 @@ except ImportError:
     from capture import Camera
     from config import (
         NUM_POSES,
+        MIN_PLAYER_SIZE,
         MIN_DETECTION_CONFIDENCE,
         MIN_TRACKING_CONFIDENCE,
     )
@@ -55,12 +57,26 @@ class PoseTracker:
             return None, None
 
         poses = result.pose_landmarks
-        if len(poses) == 1:
-            hip_x = (poses[0][23].x + poses[0][24].x) / 2.0
-            return (poses[0], None) if hip_x < 0.5 else (None, poses[0])
+        candidates = []
+        for lm in poses:
+            shoulder_y = (lm[11].y + lm[12].y) / 2.0
+            hip_y = (lm[23].y + lm[24].y) / 2.0
+            torso_size = abs(hip_y - shoulder_y)
+            if torso_size >= MIN_PLAYER_SIZE:
+                candidates.append((torso_size, lm))
 
-        poses = sorted(poses[:2], key=lambda lm: (lm[23].x + lm[24].x) / 2.0)
-        return poses[0], poses[1]
+        if not candidates:
+            return None, None
+
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        foreground_poses = [item[1] for item in candidates[:2]]
+
+        if len(foreground_poses) == 1:
+            hip_x = (foreground_poses[0][23].x + foreground_poses[0][24].x) / 2.0
+            return (foreground_poses[0], None) if hip_x < 0.5 else (None, foreground_poses[0])
+
+        sorted_poses = sorted(foreground_poses, key=lambda lm: (lm[23].x + lm[24].x) / 2.0)
+        return sorted_poses[0], sorted_poses[1]
 
     @staticmethod
     def draw_player(frame, landmarks, color, label=""):
