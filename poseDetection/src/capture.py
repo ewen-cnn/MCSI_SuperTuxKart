@@ -1,9 +1,30 @@
 import time
 import cv2
 
+try:
+    from poseDetection.src.config import (
+        CAMERA_ID,
+        CAMERA_WIDTH,
+        CAMERA_HEIGHT,
+        CAMERA_FPS,
+    )
+except ImportError:
+    from config import (
+        CAMERA_ID,
+        CAMERA_WIDTH,
+        CAMERA_HEIGHT,
+        CAMERA_FPS,
+    )
+
 
 class Camera:
-    def __init__(self, device_id: int = 0, width: int = 640, height: int = 480, fps: int = 30):
+    def __init__(
+        self,
+        device_id: int = CAMERA_ID,
+        width: int = CAMERA_WIDTH,
+        height: int = CAMERA_HEIGHT,
+        fps: int = CAMERA_FPS,
+    ):
         self.cap = cv2.VideoCapture(device_id)
         self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)

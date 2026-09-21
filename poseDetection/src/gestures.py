@@ -3,13 +3,28 @@ import cv2
 try:
     from poseDetection.src.capture import Camera
     from poseDetection.src.tracker import PoseTracker
+    from poseDetection.src.config import (
+        STEER_DEADZONE,
+        CROUCH_THRESHOLD,
+        JUMP_VELOCITY,
+    )
 except ImportError:
     from capture import Camera
     from tracker import PoseTracker
+    from config import (
+        STEER_DEADZONE,
+        CROUCH_THRESHOLD,
+        JUMP_VELOCITY,
+    )
 
 
 class DuoGestureDetector:
-    def __init__(self, steer_deadzone=0.07, crouch_threshold=0.08, jump_velocity=0.05):
+    def __init__(
+        self,
+        steer_deadzone: float = STEER_DEADZONE,
+        crouch_threshold: float = CROUCH_THRESHOLD,
+        jump_velocity: float = JUMP_VELOCITY,
+    ):
         self.steer_deadzone = steer_deadzone
         self.crouch_threshold = crouch_threshold
         self.jump_velocity = jump_velocity
@@ -34,7 +49,6 @@ class DuoGestureDetector:
         p1_hip = self._hip_pos(p1_landmarks)
         p2_hip = self._hip_pos(p2_landmarks)
 
-        # Lateral steering based on midpoint
         mid_x = None
         if p1_hip and p2_hip:
             mid_x = (p1_hip[0] + p2_hip[0]) / 2.0

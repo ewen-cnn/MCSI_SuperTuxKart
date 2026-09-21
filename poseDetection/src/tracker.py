@@ -8,15 +8,19 @@ from mediapipe.tasks.python import vision
 
 try:
     from poseDetection.src.capture import Camera
+    from poseDetection.src.config import (
+        NUM_POSES,
+        MIN_DETECTION_CONFIDENCE,
+        MIN_TRACKING_CONFIDENCE,
+    )
 except ImportError:
     from capture import Camera
+    from config import (
+        NUM_POSES,
+        MIN_DETECTION_CONFIDENCE,
+        MIN_TRACKING_CONFIDENCE,
+    )
 
-POSE_CONNECTIONS = [
-    (11, 12), (11, 13), (13, 15), (12, 14), (14, 16),
-    (11, 23), (12, 24), (23, 24),
-    (23, 25), (25, 27), (24, 26), (26, 28),
-    (0, 11), (0, 12)
-]
 
 MODEL_URL = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task"
 
@@ -35,10 +39,10 @@ class PoseTracker:
         options = vision.PoseLandmarkerOptions(
             base_options=base_options,
             running_mode=vision.RunningMode.IMAGE,
-            num_poses=2,
-            min_pose_detection_confidence=0.5,
-            min_pose_presence_confidence=0.5,
-            min_tracking_confidence=0.5,
+            num_poses=NUM_POSES,
+            min_pose_detection_confidence=MIN_DETECTION_CONFIDENCE,
+            min_pose_presence_confidence=MIN_DETECTION_CONFIDENCE,
+            min_tracking_confidence=MIN_TRACKING_CONFIDENCE,
         )
         self.detector = vision.PoseLandmarker.create_from_options(options)
 
@@ -55,7 +59,6 @@ class PoseTracker:
             hip_x = (poses[0][23].x + poses[0][24].x) / 2.0
             return (poses[0], None) if hip_x < 0.5 else (None, poses[0])
 
-        # Left person is P1, right person is P2
         poses = sorted(poses[:2], key=lambda lm: (lm[23].x + lm[24].x) / 2.0)
         return poses[0], poses[1]
 
@@ -65,9 +68,9 @@ class PoseTracker:
             return
 
         h, w, _ = frame.shape
-        for i, j in POSE_CONNECTIONS:
-            pt1 = (int(landmarks[i].x * w), int(landmarks[i].y * h))
-            pt2 = (int(landmarks[j].x * w), int(landmarks[j].y * h))
+        for conn in vision.PoseLandmarksConnections.POSE_LANDMARKS:
+            pt1 = (int(landmarks[conn.start].x * w), int(landmarks[conn.start].y * h))
+            pt2 = (int(landmarks[conn.end].x * w), int(landmarks[conn.end].y * h))
             cv2.line(frame, pt1, pt2, color, 2, cv2.LINE_AA)
 
         for lm in landmarks:
