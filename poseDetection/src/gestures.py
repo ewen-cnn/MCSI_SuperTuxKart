@@ -48,6 +48,9 @@ class DuoGestureDetector:
         self.calibrated = False
         self.t_pose_counter = 0
 
+        self.cruise_control = False
+        self.prev_hands_up = False
+
     @staticmethod
     def _hip_pos(landmarks):
         if landmarks is None:
@@ -110,7 +113,6 @@ class DuoGestureDetector:
         else:
             self.t_pose_counter = max(0, self.t_pose_counter - 1)
 
-        # 1. Player 1: Dedicated Left Steerer (leans outward left)
         p1_left_power = 0.0
         if p1_hip:
             dx1 = self.p1_neutral_x - p1_hip[0]
@@ -119,7 +121,6 @@ class DuoGestureDetector:
                 if travel1 > 0:
                     p1_left_power = min(1.0, max(0.0, (dx1 - self.steer_deadzone) / travel1))
 
-        # 2. Player 2: Dedicated Right Steerer (leans outward right)
         p2_right_power = 0.0
         if p2_hip:
             dx2 = p2_hip[0] - self.p2_neutral_x
@@ -128,7 +129,6 @@ class DuoGestureDetector:
                 if travel2 > 0:
                     p2_right_power = min(1.0, max(0.0, (dx2 - self.steer_deadzone) / travel2))
 
-        # Solo fallback if playing alone
         if p1_hip and not p2_hip:
             dx1_right = p1_hip[0] - self.p1_neutral_x
             if dx1_right > self.steer_deadzone:
@@ -142,7 +142,6 @@ class DuoGestureDetector:
                 if travel > 0:
                     p1_left_power = min(1.0, max(0.0, (dx2_left - self.steer_deadzone) / travel))
 
-        # 3. Differential Net Steering
         net = p1_left_power - p2_right_power
         steer = None
         steer_intensity = 0.0
@@ -162,9 +161,12 @@ class DuoGestureDetector:
         else:
             steer_active = False
 
-        accelerate = self._hands_up(p1_landmarks) or self._hands_up(p2_landmarks)
+        # Toggle acceleration (cruise control) on hand raise edge
+        hands_up = self._hands_up(p1_landmarks) or self._hands_up(p2_landmarks)
+        if hands_up and not self.prev_hands_up:
+            self.cruise_control = not self.cruise_control
+        self.prev_hands_up = hands_up
 
-        # 4. Crouch & Jump handling per player
         brake = False
         rescue = False
 
@@ -198,6 +200,9 @@ class DuoGestureDetector:
         else:
             self.p2_prev_y = None
 
+        # Acceleration drives if cruise control is on and not actively braking
+        accelerate = self.cruise_control and not brake
+
         return {
             "steer": steer,
             "steer_intensity": steer_intensity,
@@ -205,6 +210,7 @@ class DuoGestureDetector:
             "p1_power": p1_left_power,
             "p2_power": p2_right_power,
             "accelerate": accelerate,
+            "cruise_control": self.cruise_control,
             "brake": brake,
             "rescue": rescue,
             "p1_neutral_x": self.p1_neutral_x,
@@ -239,31 +245,26 @@ def main():
 
         h, w, _ = frame.shape
 
-        # Draw P1 neutral and deadzone
         p1_cx = int(detector.p1_neutral_x * w)
         cv2.line(frame, (p1_cx, 0), (p1_cx, h), (100, 100, 100), 1)
         p1_dz_px = int((detector.p1_neutral_x - detector.steer_deadzone) * w)
         cv2.line(frame, (p1_dz_px, 0), (p1_dz_px, h), (70, 70, 70), 1)
 
-        # Draw P2 neutral and deadzone
         p2_cx = int(detector.p2_neutral_x * w)
         cv2.line(frame, (p2_cx, 0), (p2_cx, h), (100, 100, 100), 1)
         p2_dz_px = int((detector.p2_neutral_x + detector.steer_deadzone) * w)
         cv2.line(frame, (p2_dz_px, 0), (p2_dz_px, h), (70, 70, 70), 1)
 
-        # Draw outer full-lock margins
         left_max_px = int(detector.steer_margin * w)
         right_max_px = int((1.0 - detector.steer_margin) * w)
         cv2.line(frame, (left_max_px, 0), (left_max_px, h), (40, 40, 120), 1)
         cv2.line(frame, (right_max_px, 0), (right_max_px, h), (40, 40, 120), 1)
 
-        # Dual power HUD
         p1_pct = int(gestures["p1_power"] * 100)
         p2_pct = int(gestures["p2_power"] * 100)
         cv2.putText(frame, f"P1 Left: {p1_pct}%", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, COLOR_P1, 2)
         cv2.putText(frame, f"P2 Right: {p2_pct}%", (w - 230, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, COLOR_P2, 2)
 
-        # Net steering display in center
         if gestures["steer"]:
             net_pct = int(gestures["steer_intensity"] * 100)
             active_str = "●" if gestures["steer_active"] else "○"
@@ -273,8 +274,13 @@ def main():
         else:
             cv2.putText(frame, "NET: STRAIGHT", (w // 2 - 90, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (180, 180, 180), 2)
 
-        cv2.putText(frame, "ACCEL", (20, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
-                    (0, 255, 0) if gestures["accelerate"] else (80, 80, 80), 2)
+        if gestures["accelerate"]:
+            cv2.putText(frame, "ACCEL: ON [CRUISE]", (20, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        elif gestures["cruise_control"] and gestures["brake"]:
+            cv2.putText(frame, "ACCEL: PAUSED (BRAKE)", (20, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 165, 255), 2)
+        else:
+            cv2.putText(frame, "ACCEL: OFF [Raise Hand]", (20, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (80, 80, 80), 2)
+
         cv2.putText(frame, "BRAKE", (20, 110), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
                     (0, 0, 255) if gestures["brake"] else (80, 80, 80), 2)
         cv2.putText(frame, "RESCUE", (20, 145), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
@@ -294,6 +300,8 @@ def main():
             break
         elif key in (ord('c'), ord('C')):
             detector.calibrate(p1, p2)
+        elif key in (ord('a'), ord('A')):
+            detector.cruise_control = not detector.cruise_control
 
     cam.release()
     cv2.destroyAllWindows()

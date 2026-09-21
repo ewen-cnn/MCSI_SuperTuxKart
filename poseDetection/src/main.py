@@ -100,8 +100,12 @@ def main():
             else:
                 cv2.putText(frame, "NET: STRAIGHT", (w // 2 - 90, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (180, 180, 180), 2)
 
-            accel_col = (0, 255, 0) if "ACCELERATE" in actions else (80, 80, 80)
-            cv2.putText(frame, "ACCEL", (20, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.65, accel_col, 2)
+            if gestures["accelerate"]:
+                cv2.putText(frame, "ACCEL: ON [CRUISE]", (20, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0), 2)
+            elif gestures["cruise_control"] and gestures["brake"]:
+                cv2.putText(frame, "ACCEL: PAUSED (BRAKE)", (20, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 165, 255), 2)
+            else:
+                cv2.putText(frame, "ACCEL: OFF [Raise Hand]", (20, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (80, 80, 80), 2)
 
             brake_col = (0, 0, 255) if "BRAKE" in actions else (80, 80, 80)
             cv2.putText(frame, "BRAKE", (20, 125), cv2.FONT_HERSHEY_SIMPLEX, 0.65, brake_col, 2)
@@ -123,6 +127,8 @@ def main():
                 break
             elif key in (ord('c'), ord('C')):
                 detector.calibrate(p1, p2)
+            elif key in (ord('a'), ord('A')):
+                detector.cruise_control = not detector.cruise_control
 
     finally:
         client.close()
