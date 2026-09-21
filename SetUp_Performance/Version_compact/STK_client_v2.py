@@ -124,10 +124,9 @@ MOTION_TOLERANCE = 3.00
 # commande en rafale en dosant le rapport cyclique. Sur une periode :
 #     t1 = intensite * CONTINUOUS_PERIOD        -> touche enfoncee
 #     t2 = (1 - intensite) * CONTINUOUS_PERIOD  -> touche relachee
-CONTINUOUS_PERIOD = 0.05   # duree d'un cycle pressed + released (s)
+CONTINUOUS_PERIOD = 0.04   # duree d'un cycle pressed + released (s)
 SKID_KICKOFF = 0.15 
-SKID_LEVEL_MIN = 0.3    # plancher : en dessous, la glisse retombe
-SKID_LEVEL_MAX = 0.7    # plafond : au-dessus, la courbe se referme trop
+SKID_INTO_MAX = 0.7     # braquage maxi DANS le sens du virage pendant la glisse
 LOOP_HZ = 120       # frequence de la boucle principale
 # A 120 Hz avec une periode de 0.10 s, on dispose de 12 crans d'intensite.
 # Baisser LOOP_HZ ou CONTINUOUS_PERIOD rend le dosage plus grossier.
@@ -723,6 +722,7 @@ def main():
     period = 1.0 / LOOP_HZ
     shake_lock_until = 0.0
     skid_started_at = 0.0
+    skid_direction = 'NONE'
     try:
         while True:
             now = time.time()
@@ -758,7 +758,7 @@ def main():
             
             # --- Secousse -> sauvetage ---------------------------
             gyro_shake = gyr_ok and shake_detector.updategyr(gx, now)
-            camera_shake = camera_ok and shake_detector.updatecamera(cx, now)
+            camera_shake = camera_ok and shake_detector.updatecamera(cx, now) and cz > -90
             if gyro_shake or camera_shake:
                 rescue_button.trigger(now)
                 shake_lock_until = now + SHAKE_LOCKOUT
@@ -805,15 +805,19 @@ def main():
             direction = zone(nx, DEAD_ZONE_X, 'LEFT', 'RIGHT')
             niveau = intensity(nx, DEAD_ZONE_X)
 
-            # Pendant la glisse : jamais tout droit (la glisse retomberait),
-            # jamais a fond (la courbe se refermerait). La course du telephone
-            # ne sert plus qu'a ajuster la trajectoire dans cette bande.
-            if kart.skidding_on:
-                niveau = SKID_LEVEL_MIN + niveau * (SKID_LEVEL_MAX - SKID_LEVEL_MIN)
-
-            # A l'amorce seulement, on court-circuite la MLI pour garantir que
-            # la fleche est enfoncee quand P_SKIDDING part.
+            # A l'amorce, on court-circuite la MLI : le jeu fige le sens du
+            # derapage a l'instant ou P_SKIDDING part, et il faut qu'une
+            # fleche soit enfoncee a ce moment-la.
             amorce = kart.skidding_on and (now - skid_started_at) < SKID_KICKOFF
+            if amorce and direction != 'NONE':
+                skid_direction = direction
+
+            # Pendant la glisse, le jeu remappe le braquage [-1, 1] vers
+            # [0.2, 0.8] : dans le virage -> 0.8 (serre), rien -> 0.5,
+            # contre le virage -> 0.2 (large). On ne plafonne donc que le
+            # sens du virage, pour eviter la courbe la plus serree.
+            if kart.skidding_on and direction == skid_direction:
+                niveau = min(niveau, SKID_INTO_MAX)
 
             if amorce or steering_pwm.pressed(niveau, now):
                 kart.set_steering(direction)
