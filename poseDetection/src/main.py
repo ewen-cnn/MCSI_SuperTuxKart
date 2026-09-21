@@ -56,14 +56,15 @@ def main():
             tracker.draw_player(frame, p2, COLOR_P2, "P2")
 
             h, w, _ = frame.shape
-            cv2.line(frame, (w // 2, 0), (w // 2, h), (100, 100, 100), 1)
+            cx = int(detector.neutral_center_x * w)
+            cv2.line(frame, (cx, 0), (cx, h), (100, 100, 100), 1)
             dz_px = int(detector.steer_deadzone * w)
-            cv2.line(frame, (w // 2 - dz_px, 0), (w // 2 - dz_px, h), (70, 70, 70), 1)
-            cv2.line(frame, (w // 2 + dz_px, 0), (w // 2 + dz_px, h), (70, 70, 70), 1)
+            cv2.line(frame, (cx - dz_px, 0), (cx - dz_px, h), (70, 70, 70), 1)
+            cv2.line(frame, (cx + dz_px, 0), (cx + dz_px, h), (70, 70, 70), 1)
 
             if gestures["mid_x"] is not None:
-                cx = int(gestures["mid_x"] * w)
-                cv2.circle(frame, (cx, h - 35), 8, (0, 255, 255), -1)
+                mx = int(gestures["mid_x"] * w)
+                cv2.circle(frame, (mx, h - 35), 8, (0, 255, 255), -1)
 
             now = time.time()
             dt = now - prev
@@ -85,9 +86,20 @@ def main():
             rescue_col = (0, 165, 255) if "RESCUE" in actions else (80, 80, 80)
             cv2.putText(frame, "RESCUE", (20, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.65, rescue_col, 2)
 
+            if gestures["t_pose_progress"] > 0:
+                prog = int(gestures["t_pose_progress"] * 100)
+                cv2.putText(frame, f"CALIBRATING: {prog}%", (20, 180),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+            elif detector.calibrated:
+                cv2.putText(frame, "CALIBRATED ('c' to reset)", (20, 180),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+
             cv2.imshow("SuperTuxKart Vision Controller", frame)
-            if cv2.waitKey(1) & 0xFF in (ord('q'), 27):
+            key = cv2.waitKey(1) & 0xFF
+            if key in (ord('q'), 27):
                 break
+            elif key in (ord('c'), ord('C')):
+                detector.calibrate(p1, p2)
 
     finally:
         client.close()
