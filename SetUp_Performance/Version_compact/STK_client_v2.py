@@ -1,34 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-TP1 - MCSI - Parties 1, 2a, 2b, 3 et 4
-
-Recoit les messages OSC de MultiSense Osc et les traduit en commandes
-SuperTuxKart envoyees en UDP a STK_input_server.py.
-
-Techniques d'interaction implementees :
-    Partie 1  - tactile      : toucher le pad a gauche/droite -> tourner
-                               toucher le pad en haut/bas     -> accelerer/freiner
-    Partie 2b - manipulative : doigt leve, l'inclinaison du telephone prend
-                               le relais (accelerometre)
-    Partie 3a - double-tap sur le pad       -> lancer un objet (FIRE)
-    Partie 3b - secousse autour de l'axe X  -> sauvetage (RESCUE, gyroscope)
-    Partie 2a - joystick     : le pad devient un joystick relatif (press & drag)
-    Partie 4  - envoi continu: la direction est dosee en alternant pressed
-                               et released (rapport cyclique)
-
-Capteurs a activer dans MultiSense Osc : PAD, Accelerometre, Gyroscope.
-
-Chaine complete :
-    Telephone --OSC:8000--> ce script --UDP:6006--> STK_input_server.py
-        --clavier--> SuperTuxKart
-
-Usage :
-    python STK_client_v2.py            # normal
-    python STK_client_v2.py -d         # debug : affiche les commandes envoyees
-    python STK_client_v2.py --calib    # calibration des seuils
-"""
-
 ###############################################################################
 ## Global libs
 import math
@@ -36,6 +5,8 @@ import socket
 import sys
 import threading
 import time
+import subprocess
+import os
 from collections import deque
 
 from oscpy.server import OSCThreadServer
@@ -59,7 +30,7 @@ PAD_Y_MIN, PAD_Y_MAX = -1.0, 1.0
 INVERT_Y = True     # True si y=0 correspond au HAUT de l'ecran (cas habituel)
 
 # --- Calibration de l'accelerometre (en m/s2, gravite = 9.81) ---------------
-ACC_X_MIN, ACC_X_MAX = -3, 3    # pencher a gauche / a droite
+ACC_X_MIN, ACC_X_MAX = -2, 2    # pencher a gauche / a droite
 ACC_Y_MIN, ACC_Y_MAX = -7,-3    # pencher en avant / en arriere
 INVERT_ACC_Y = True
     
@@ -256,7 +227,7 @@ class PadState:
 
     def set_y(self, value):
         with self._lock:
-            self._x = value
+            self._y = value
             self._pressed = True          # un message x ou y = le doigt est pose
             self._last_update = time.time()
 
@@ -687,6 +658,11 @@ def run_calibration():
 
 
 ###############################################################################
+## Lancement des programmes serveur et face tracking
+
+
+
+###############################################################################
 ## Main
 def main():
     debug = '-d' in sys.argv or '--debug' in sys.argv
@@ -694,7 +670,7 @@ def main():
     if '--calib' in sys.argv:
         run_calibration()
         return
-
+    
     sender = STKSender(STK_SERVER_ADDRESS, debug=debug)
     kart = KartState(sender, debug=debug)
     pad = PadState()
@@ -714,9 +690,19 @@ def main():
     osc = OSCThreadServer()
     osc.listen(address=OSC_LISTEN_IP, port=OSC_LISTEN_PORT, default=True)
     bind_all(osc, pad, acc, gyr, camera)
-
     print()
     print('STK client v2 started ', end='')
+
+    # Lance le serveur et le face tracking, chacun dans sa propre console.
+    ici = os.path.dirname(os.path.abspath(__file__))
+    serveur = subprocess.Popen(
+        [sys.executable, os.path.join(ici, 'STK_input_server.py'), '-d'],
+        cwd=ici, creationflags=subprocess.CREATE_NEW_CONSOLE)
+    time.sleep(1.0)          # laisse le serveur prendre le port 6006
+    tracking = subprocess.Popen(
+        [sys.executable, os.path.join(ici, 'face_tracking.py')],
+        cwd=ici, creationflags=subprocess.CREATE_NEW_CONSOLE)
+    
     if debug:   print(GREEN + '(Debug mode)' + WHITE)
     else:       print()
     print('  OSC : ecoute sur {}:{}  (a saisir dans MultiSense Osc)'.format(
@@ -846,6 +832,8 @@ def main():
         fire_button.release_now()
         rescue_button.release_now()
         osc.stop()
+        serveur.terminate()         # <-- ajout
+        tracking.terminate()        # <-- ajout
         print()
         print('STK client v2 stopped')
 
