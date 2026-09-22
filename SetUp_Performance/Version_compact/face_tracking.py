@@ -156,14 +156,14 @@ def visualize(
 
     #### Part 2: get the position of the eyes and compute the center of the eyes ####
     # Draw only the keypoints corresponding to the eyes
-  for i in range(2):
-    keypoint = detection.keypoints[i]
-    keypoint_px = _normalized_to_pixel_coordinates(keypoint.x, keypoint.y,
-                                                    width, height)
-    color, thickness, radius = (0, 255, 0), 2, 2
+    for i in range(2):
+      keypoint = detection.keypoints[i]
+      keypoint_px = _normalized_to_pixel_coordinates(keypoint.x, keypoint.y,
+                                                      width, height)
+      color, thickness, radius = (0, 255, 0), 2, 2
 
-    if keypoint_px is not None:
-        cv2.circle(annotated_image, keypoint_px, thickness, color, radius)
+      if keypoint_px is not None:
+          cv2.circle(annotated_image, keypoint_px, thickness, color, radius)
 
 
     # Draw the center of the eyes with a different color
@@ -240,7 +240,9 @@ def runtracking():
 
         # Convert the opencv image to RGB
         img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-
+        if not ret:
+            continue
+    
         # Convert the frame received from OpenCV to a MediaPipe’s Image object.
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img_rgb) 
 
@@ -262,7 +264,7 @@ def runtracking():
                 
 
             # Get the position of the two eyes in pixels 
-            if len( biggest_face.keypoints) >=2:
+            if len(res.tracking_results.detections) > 0 and len(biggest_face.keypoints) >= 2:
                 eye1 = biggest_face.keypoints[0]
                 eye2 = biggest_face.keypoints[1]
 
@@ -316,10 +318,10 @@ def runtracking():
                break
   
     # release the video stream from the camera
-    cap.release()
+    #cap.release()
       
     # close the associated window 
-    cv2.destroyAllWindows() 
+    #cv2.destroyAllWindows() 
 
 
 ############################ program execution #############################
