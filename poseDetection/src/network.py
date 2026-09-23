@@ -1,24 +1,26 @@
 import socket
+from typing import Set
 
-try:
-    from poseDetection.src.config import UDP_HOST, UDP_PORT
-except ImportError:
-    from config import UDP_HOST, UDP_PORT
+from config import NetworkConfig
 
 
 class STKClient:
-    def __init__(self, host: str = UDP_HOST, port: int = UDP_PORT):
-        self.address = (host, port)
+    """Sends UDP press/release commands to SuperTuxKart."""
+
+    def __init__(self, config: NetworkConfig = NetworkConfig()):
+        self.config = config
+        self.address = (self.config.host, self.config.port)
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.active_actions = set()
+        self.active_actions: Set[str] = set()
 
     def send_command(self, cmd: str):
         try:
             self.sock.sendto(cmd.encode("utf-8"), self.address)
         except Exception as e:
-            print(f"[UDP Warning] {e}")
+            print(f"[UDP Warning] Failed to send {cmd}: {e}")
 
-    def update(self, current_actions: set):
+    def update(self, current_actions: Set[str]):
+        """Diffs new actions with active actions, sending press (P_) and release (R_) commands."""
         for action in current_actions - self.active_actions:
             self.send_command(f"P_{action}")
 
@@ -41,3 +43,21 @@ class STKClient:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
+
+
+def main():
+    import time
+
+    cfg = NetworkConfig()
+    print(f"Testing STKClient on {cfg.host}:{cfg.port}...")
+    with STKClient(cfg) as client:
+        client.update({"ACCELERATE"})
+        time.sleep(0.5)
+        client.update({"ACCELERATE", "LEFT"})
+        time.sleep(0.5)
+        client.update(set())
+    print("Network test complete.")
+
+
+if __name__ == "__main__":
+    main()
