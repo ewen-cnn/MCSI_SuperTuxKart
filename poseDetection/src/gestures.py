@@ -1,9 +1,11 @@
 import time
 from typing import Optional, Tuple
+import numpy as np
 
-from config import AppConfig, SteeringConfig, GestureConfig, CalibrationConfig
+from config import AppConfig, SteeringConfig, GestureConfig, CalibrationConfig, ColorConfig
 from pose_types import PlayerPose, SteeringState, GestureResult, CalibrationStatus
 from calibration import CalibrationManager
+from color_detector import ColorCardDetector
 from capture import Camera
 from tracker import PoseTracker
 from hud import HUD
@@ -157,11 +159,13 @@ class DuoGestureDetector:
         steering_config: Optional[SteeringConfig] = None,
         gesture_config: Optional[GestureConfig] = None,
         calibration_config: Optional[CalibrationConfig] = None,
+        color_config: Optional[ColorConfig] = None,
     ):
         base_cfg = config or AppConfig()
         st_cfg = steering_config or base_cfg.steering
         ge_cfg = gesture_config or base_cfg.gestures
         cal_cfg = calibration_config or base_cfg.calibration
+        cl_cfg = color_config or base_cfg.color
 
         self.config = base_cfg
         self.steering_engine = SteeringEngine(config=st_cfg)
@@ -170,9 +174,24 @@ class DuoGestureDetector:
             config=cal_cfg,
             steering_config=st_cfg,
         )
+        self.color_detector = ColorCardDetector(config=cl_cfg)
+        self.rescue_mode: str = ge_cfg.rescue_mode
 
         self.cruise_control: bool = False
         self.prev_hands_up: bool = False
+
+    def toggle_rescue_mode(self) -> str:
+        """Toggles rescue mode between 'color' and 'jump'."""
+        if self.rescue_mode == "color":
+            self.rescue_mode = "jump"
+        else:
+            self.rescue_mode = "color"
+        return self.rescue_mode
+
+    def sample_card_color(self, frame: Optional[np.ndarray], box_size: int = 80) -> Tuple[bool, str]:
+        """Samples card color from the center of the frame and updates HSV thresholds."""
+        return self.color_detector.sample_from_frame(frame, box_size=box_size)
+
 
     @property
     def steer_margin(self) -> float:
@@ -229,6 +248,7 @@ class DuoGestureDetector:
         self,
         p1: Optional[PlayerPose] = None,
         p2: Optional[PlayerPose] = None,
+        frame: Optional[np.ndarray] = None,
         timestamp: Optional[float] = None,
     ) -> GestureResult:
         if timestamp is None:
@@ -265,8 +285,26 @@ class DuoGestureDetector:
             p2, calib.p2_standing_y, is_calibrating=p2_is_calib
         )
 
+        card_triggered = False
+        card_detected = False
+        card_bbox = None
+        if frame is not None:
+            card_triggered, card_detected, card_bbox = self.color_detector.detect(
+                frame, timestamp=timestamp
+            )
+
         brake = p1_brake or p2_brake
-        rescue = p1_jump or p2_jump
+        jump_triggered = p1_jump or p2_jump
+
+        if self.rescue_mode == "color":
+            rescue = card_triggered
+        elif self.rescue_mode == "jump":
+            rescue = jump_triggered
+        elif self.rescue_mode == "both":
+            rescue = jump_triggered or card_triggered
+        else:
+            rescue = card_triggered
+
         accelerate = self.cruise_control and not brake
 
         return GestureResult(
@@ -288,7 +326,11 @@ class DuoGestureDetector:
             p1_hip=p1.hip if p1 else None,
             p2_hip=p2.hip if p2 else None,
             calibration=calib,
+            card_detected=card_detected,
+            card_bbox=card_bbox,
+            rescue_mode=self.rescue_mode,
         )
+
 
 
 def main():
@@ -311,7 +353,7 @@ def main():
                 break
 
             p1, p2 = tracker.process(frame)
-            gestures = detector.detect(p1, p2)
+            gestures = detector.detect(p1, p2, frame=frame, timestamp=now)
 
             now = time.time()
             dt = now - prev
@@ -326,9 +368,11 @@ def main():
             if key in (ord("q"), 27):
                 break
             elif key in (ord("c"), ord("C")):
-                detector.calibrate(p1, p2)
+                detector.calibrate(p1, p2, timestamp=now)
             elif key in (ord("a"), ord("A")):
                 detector.cruise_control = not detector.cruise_control
+            elif key in (ord("r"), ord("R")):
+                detector.toggle_rescue_mode()
 
     cv2.destroyAllWindows()
 

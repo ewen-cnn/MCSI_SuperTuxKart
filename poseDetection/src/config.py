@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from typing import Tuple, Optional
 
 
 @dataclass
@@ -22,13 +23,30 @@ class SteeringConfig:
 class GestureConfig:
     crouch_threshold: float = 0.045
     jump_threshold: float = 0.045
-    default_standing_y: float = 0.50
+    default_standing_y: float = 0.34
     default_torso_height: float = 0.28
-    default_brake_y: float = 0.58
-    default_jump_y: float = 0.42
+    default_brake_y: float = 0.39
+    default_jump_y: float = 0.29
+    rescue_mode: str = "color"
 
 
 @dataclass
+class ColorConfig:
+    enabled: bool = True
+    preset: str = "green"
+    lower_hsv: Tuple[int, int, int] = (40, 80, 60)
+    upper_hsv: Tuple[int, int, int] = (82, 255, 255)
+    min_area: int = 180
+    max_area: Optional[int] = 30000
+    min_solidity: float = 0.70
+    min_extent: float = 0.40
+    max_aspect_ratio: float = 3.5
+    cooldown_seconds: float = 1.5
+    pulse_duration: float = 0.2
+
+
+@dataclass
+
 class CalibrationConfig:
     frames_required: int = 30
     cooldown_seconds: float = 3.0
@@ -72,6 +90,8 @@ class AppConfig:
     filter: FilterConfig = field(default_factory=FilterConfig)
     tracker: TrackerConfig = field(default_factory=TrackerConfig)
     network: NetworkConfig = field(default_factory=NetworkConfig)
+    color: ColorConfig = field(default_factory=ColorConfig)
 
 
 DEFAULT_CONFIG = AppConfig()
+
