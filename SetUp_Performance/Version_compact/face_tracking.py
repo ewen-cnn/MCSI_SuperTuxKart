@@ -264,7 +264,7 @@ def runtracking():
                 
 
             # Get the position of the two eyes in pixels 
-            if len(res.tracking_results.detections) > 0 and len(biggest_face.keypoints) >= 2:
+            if len(res.tracking_results.detections) > 0 and len(biggest_face.keypoints) >=1:
                 eye1 = biggest_face.keypoints[0]
                 eye2 = biggest_face.keypoints[1]
 

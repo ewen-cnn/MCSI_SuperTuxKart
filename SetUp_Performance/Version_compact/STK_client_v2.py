@@ -30,7 +30,7 @@ PAD_Y_MIN, PAD_Y_MAX = -1.0, 1.0
 INVERT_Y = True     # True si y=0 correspond au HAUT de l'ecran (cas habituel)
 
 # --- Calibration de l'accelerometre (en m/s2, gravite = 9.81) ---------------
-ACC_X_MIN, ACC_X_MAX = -2, 2    # pencher a gauche / a droite
+ACC_X_MIN, ACC_X_MAX = -3, 3    # pencher a gauche / a droite
 ACC_Y_MIN, ACC_Y_MAX = -7,-3    # pencher en avant / en arriere
 INVERT_ACC_Y = True
     
