@@ -432,3 +432,11 @@ FodyWeavers.xsd
 .venv/
 venv/
 env/
+
+# Downloaded models
+models/
+*.task
+
+# Local user scripts and tests
+launch_game.sh
+poseDetection/src/test_modular_pipeline.py
