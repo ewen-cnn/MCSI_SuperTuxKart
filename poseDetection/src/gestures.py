@@ -1,341 +1,335 @@
 import time
-import cv2
+from typing import Optional, Tuple
 
-try:
-    from poseDetection.src.capture import Camera
-    from poseDetection.src.tracker import PoseTracker
-    from poseDetection.src.config import (
-        STEER_DEADZONE,
-        STEER_MARGIN,
-        PWM_PERIOD,
-        CROUCH_THRESHOLD,
-        JUMP_VELOCITY,
-    )
-except ImportError:
-    from capture import Camera
-    from tracker import PoseTracker
-    from config import (
-        STEER_DEADZONE,
-        STEER_MARGIN,
-        PWM_PERIOD,
-        CROUCH_THRESHOLD,
-        JUMP_VELOCITY,
-    )
+from config import AppConfig, SteeringConfig, GestureConfig, CalibrationConfig
+from pose_types import PlayerPose, SteeringState, GestureResult, CalibrationStatus
+from calibration import CalibrationManager
+from capture import Camera
+from tracker import PoseTracker
+from hud import HUD
+
+
+class PWMModulator:
+    """Translates continuous steering intensity into periodic binary pulses."""
+
+    def __init__(self, period: float = 0.15, full_steer_threshold: float = 0.98):
+        self.period = period
+        self.full_steer_threshold = full_steer_threshold
+        self.pulse_start_time: Optional[float] = None
+        self.last_direction: Optional[str] = None
+
+    def update(
+        self, direction: Optional[str], intensity: float, timestamp: Optional[float] = None
+    ) -> bool:
+        if not direction or intensity <= 0.0:
+            self.pulse_start_time = None
+            self.last_direction = None
+            return False
+
+        if timestamp is None:
+            timestamp = time.time()
+
+        if self.last_direction != direction or self.pulse_start_time is None:
+            self.pulse_start_time = timestamp
+            self.last_direction = direction
+
+        if intensity >= self.full_steer_threshold:
+            return True
+
+        elapsed = (timestamp - self.pulse_start_time) % self.period
+        cycle_pos = elapsed / self.period
+        return cycle_pos < intensity
+
+    def reset(self):
+        self.pulse_start_time = None
+        self.last_direction = None
+
+
+class SteeringEngine:
+    """Calculates normalized steering power for duo and solo modes."""
+
+    def __init__(self, config: SteeringConfig = SteeringConfig()):
+        self.config = config
+        self.modulator = PWMModulator(
+            period=self.config.pwm_period,
+            full_steer_threshold=self.config.full_steer_intensity,
+        )
+
+    @staticmethod
+    def _calc_power(val: float, limit: float, margin: float, direction: str) -> float:
+        if direction == "LEFT":
+            travel = max(1e-4, limit - margin)
+            return min(1.0, max(0.0, (limit - val) / travel))
+        else:
+            travel = max(1e-4, (1.0 - margin) - limit)
+            return min(1.0, max(0.0, (val - limit) / travel))
+
+    def calculate(
+        self,
+        p1: Optional[PlayerPose],
+        p2: Optional[PlayerPose],
+        left_thresh: float,
+        right_thresh: float,
+        p1_neutral_x: float,
+        p2_neutral_x: float,
+        timestamp: Optional[float] = None,
+    ) -> SteeringState:
+        p1_left_power = 0.0
+        p2_right_power = 0.0
+        margin = self.config.margin
+        deadzone = self.config.deadzone
+
+        if p1 is not None and p2 is not None:
+            # Duo mode: P1 controls left, P2 controls right
+            if p1.hip_x < left_thresh:
+                p1_left_power = self._calc_power(p1.hip_x, left_thresh, margin, "LEFT")
+            if p2.hip_x > right_thresh:
+                p2_right_power = self._calc_power(p2.hip_x, right_thresh, margin, "RIGHT")
+        elif p1 is not None:
+            # Solo mode (P1)
+            if p1.hip_x < left_thresh:
+                p1_left_power = self._calc_power(p1.hip_x, left_thresh, margin, "LEFT")
+            elif p1.hip_x > right_thresh:
+                p2_right_power = self._calc_power(p1.hip_x, right_thresh, margin, "RIGHT")
+        elif p2 is not None:
+            # Solo mode (P2)
+            if p2.hip_x < left_thresh:
+                p1_left_power = self._calc_power(p2.hip_x, left_thresh, margin, "LEFT")
+            elif p2.hip_x > right_thresh:
+                p2_right_power = self._calc_power(p2.hip_x, right_thresh, margin, "RIGHT")
+
+        net = p1_left_power - p2_right_power
+        direction = None
+        intensity = 0.0
+
+        if net > self.config.net_deadband:
+            direction = "LEFT"
+            intensity = net
+        elif net < -self.config.net_deadband:
+            direction = "RIGHT"
+            intensity = abs(net)
+
+        active = self.modulator.update(direction, intensity, timestamp=timestamp)
+
+        return SteeringState(
+            direction=direction,
+            intensity=intensity,
+            active=active,
+            p1_power=p1_left_power,
+            p2_power=p2_right_power,
+        )
+
+
+class VerticalActionDetector:
+    """Evaluates jumping and crouching relative to calibrated baselines."""
+
+    def __init__(self, config: GestureConfig = GestureConfig()):
+        self.config = config
+
+    def evaluate_player(
+        self,
+        pose: Optional[PlayerPose],
+        standing_y: Optional[float],
+        is_calibrating: bool = False,
+    ) -> Tuple[bool, bool, float, float]:
+        """Calculates (brake_active, jump_active, brake_y, jump_y) for a player."""
+        base_y = standing_y if standing_y is not None else self.config.default_standing_y
+        brake_y = base_y + self.config.crouch_threshold
+        jump_y = base_y - self.config.jump_threshold
+
+        brake = False
+        jump = False
+        if pose is not None and not is_calibrating:
+            if pose.shoulder_y > brake_y:
+                brake = True
+            elif pose.shoulder_y < jump_y:
+                jump = True
+
+        return brake, jump, brake_y, jump_y
 
 
 class DuoGestureDetector:
+    """Coordinates dual-player gestures, steering, calibration, and cruise control."""
+
     def __init__(
         self,
-        steer_deadzone: float = STEER_DEADZONE,
-        steer_margin: float = STEER_MARGIN,
-        pwm_period: float = PWM_PERIOD,
-        crouch_threshold: float = CROUCH_THRESHOLD,
-        jump_velocity: float = JUMP_VELOCITY,
+        config: Optional[AppConfig] = None,
+        steering_config: Optional[SteeringConfig] = None,
+        gesture_config: Optional[GestureConfig] = None,
+        calibration_config: Optional[CalibrationConfig] = None,
     ):
-        self.steer_deadzone = steer_deadzone
-        self.steer_margin = steer_margin
-        self.pwm_period = pwm_period
-        self.crouch_threshold = crouch_threshold
-        self.jump_velocity = jump_velocity
+        base_cfg = config or AppConfig()
+        st_cfg = steering_config or base_cfg.steering
+        ge_cfg = gesture_config or base_cfg.gestures
+        cal_cfg = calibration_config or base_cfg.calibration
 
-        self.p1_neutral_x = 0.35
-        self.p2_neutral_x = 0.65
-        self.p1_standing_y = None
-        self.p2_standing_y = None
-        self.p1_prev_y = None
-        self.p2_prev_y = None
+        self.config = base_cfg
+        self.steering_engine = SteeringEngine(config=st_cfg)
+        self.vertical_detector = VerticalActionDetector(config=ge_cfg)
+        self.calibrator = CalibrationManager(
+            config=cal_cfg,
+            steering_config=st_cfg,
+        )
 
-        self.calibrated = False
-        self.t_pose_counter = 0
+        self.cruise_control: bool = False
+        self.prev_hands_up: bool = False
 
-        self.cruise_control = False
-        self.prev_hands_up = False
+    @property
+    def steer_margin(self) -> float:
+        return self.steering_engine.config.margin
+
+    @property
+    def is_calibrated(self) -> bool:
+        return self.calibrator.state.is_calibrated
+
+    @property
+    def p1_neutral_x(self) -> float:
+        return self.calibrator.state.p1_neutral_x
+
+    @property
+    def p2_neutral_x(self) -> float:
+        return self.calibrator.state.p2_neutral_x
 
     @staticmethod
-    def _hip_pos(landmarks):
-        if landmarks is None:
-            return None
-        hx = (landmarks[23].x + landmarks[24].x) / 2.0
-        hy = (landmarks[23].y + landmarks[24].y) / 2.0
-        return hx, hy
-
-    @staticmethod
-    def _hands_up(landmarks):
-        if landmarks is None:
+    def is_hands_up(pose: Optional[PlayerPose]) -> bool:
+        """Checks if player has either hand raised above their shoulder."""
+        if pose is None:
             return False
-        return (landmarks[15].y < landmarks[11].y) or (landmarks[16].y < landmarks[12].y)
+        return (pose.left_wrist.y < pose.left_shoulder.y) or (
+            pose.right_wrist.y < pose.right_shoulder.y
+        )
 
-    @staticmethod
-    def _is_t_pose(landmarks):
-        if landmarks is None:
-            return False
-        left_arm = (abs(landmarks[15].y - landmarks[11].y) < 0.12) and (abs(landmarks[15].x - landmarks[11].x) > 0.15)
-        right_arm = (abs(landmarks[16].y - landmarks[12].y) < 0.12) and (abs(landmarks[16].x - landmarks[12].x) > 0.15)
-        return left_arm and right_arm
+    def calibrate(
+        self,
+        p1: Optional[PlayerPose] = None,
+        p2: Optional[PlayerPose] = None,
+        timestamp: Optional[float] = None,
+    ) -> bool:
+        return self.calibrator.calibrate(p1, p2, timestamp=timestamp)
 
-    def calibrate(self, p1_landmarks, p2_landmarks):
-        p1_hip = self._hip_pos(p1_landmarks)
-        p2_hip = self._hip_pos(p2_landmarks)
+    def calculate_steering(
+        self,
+        p1: Optional[PlayerPose],
+        p2: Optional[PlayerPose],
+        left_thresh: float,
+        right_thresh: float,
+        timestamp: Optional[float] = None,
+    ) -> SteeringState:
+        return self.steering_engine.calculate(
+            p1=p1,
+            p2=p2,
+            left_thresh=left_thresh,
+            right_thresh=right_thresh,
+            p1_neutral_x=self.p1_neutral_x,
+            p2_neutral_x=self.p2_neutral_x,
+            timestamp=timestamp,
+        )
 
-        if p1_hip and p2_hip:
-            self.p1_neutral_x = p1_hip[0]
-            self.p2_neutral_x = p2_hip[0]
-            self.p1_standing_y = p1_hip[1]
-            self.p2_standing_y = p2_hip[1]
-            self.calibrated = True
-            return True
-        elif p1_hip:
-            self.p1_neutral_x = p1_hip[0]
-            self.p1_standing_y = p1_hip[1]
-            self.calibrated = True
-            return True
-        elif p2_hip:
-            self.p2_neutral_x = p2_hip[0]
-            self.p2_standing_y = p2_hip[1]
-            self.calibrated = True
-            return True
-        return False
+    def detect(
+        self,
+        p1: Optional[PlayerPose] = None,
+        p2: Optional[PlayerPose] = None,
+        timestamp: Optional[float] = None,
+    ) -> GestureResult:
+        if timestamp is None:
+            timestamp = time.time()
 
-    def detect(self, p1_landmarks, p2_landmarks):
-        p1_hip = self._hip_pos(p1_landmarks)
-        p2_hip = self._hip_pos(p2_landmarks)
+        calib = self.calibrator.update(p1, p2, timestamp=timestamp)
 
-        p1_t = self._is_t_pose(p1_landmarks)
-        p2_t = self._is_t_pose(p2_landmarks)
-        t_pose_active = (p1_t and p2_t) if (p1_landmarks and p2_landmarks) else (p1_t or p2_t)
+        steering = self.calculate_steering(
+            p1,
+            p2,
+            left_thresh=calib.left_thresh,
+            right_thresh=calib.right_thresh,
+            timestamp=timestamp,
+        )
 
-        just_calibrated = False
-        if t_pose_active:
-            self.t_pose_counter += 1
-            if self.t_pose_counter >= 30:
-                just_calibrated = self.calibrate(p1_landmarks, p2_landmarks)
-                self.t_pose_counter = 0
-        else:
-            self.t_pose_counter = max(0, self.t_pose_counter - 1)
-
-        left_thresh = self.p1_neutral_x - self.steer_deadzone
-        right_thresh = self.p2_neutral_x + self.steer_deadzone
-
-        p1_left_power = 0.0
-        if p1_hip:
-            if p1_hip[0] < left_thresh:
-                travel1 = left_thresh - self.steer_margin
-                if travel1 > 0:
-                    p1_left_power = min(1.0, max(0.0, (left_thresh - p1_hip[0]) / travel1))
-
-        p2_right_power = 0.0
-        if p2_hip:
-            if p2_hip[0] > right_thresh:
-                travel2 = (1.0 - self.steer_margin) - right_thresh
-                if travel2 > 0:
-                    p2_right_power = min(1.0, max(0.0, (p2_hip[0] - right_thresh) / travel2))
-
-        # Solo fallback if playing alone
-        if p1_hip and not p2_hip:
-            if p1_hip[0] > (self.p1_neutral_x + self.steer_deadzone):
-                travel = (1.0 - self.steer_margin) - (self.p1_neutral_x + self.steer_deadzone)
-                if travel > 0:
-                    p2_right_power = min(1.0, max(0.0, (p1_hip[0] - (self.p1_neutral_x + self.steer_deadzone)) / travel))
-        elif p2_hip and not p1_hip:
-            if p2_hip[0] < (self.p2_neutral_x - self.steer_deadzone):
-                travel = (self.p2_neutral_x - self.steer_deadzone) - self.steer_margin
-                if travel > 0:
-                    p1_left_power = min(1.0, max(0.0, ((self.p2_neutral_x - self.steer_deadzone) - p2_hip[0]) / travel))
-
-        net = p1_left_power - p2_right_power
-        steer = None
-        steer_intensity = 0.0
-
-        if net > 0.01:
-            steer = "LEFT"
-            steer_intensity = net
-        elif net < -0.01:
-            steer = "RIGHT"
-            steer_intensity = abs(net)
-
-        if steer_intensity >= 0.98:
-            steer_active = True
-        elif steer_intensity > 0.0:
-            cycle_pos = (time.time() % self.pwm_period) / self.pwm_period
-            steer_active = cycle_pos < steer_intensity
-        else:
-            steer_active = False
-
-        hands_up = self._hands_up(p1_landmarks) or self._hands_up(p2_landmarks)
+        hands_up = self.is_hands_up(p1) or self.is_hands_up(p2)
         if hands_up and not self.prev_hands_up:
             self.cruise_control = not self.cruise_control
         self.prev_hands_up = hands_up
 
-        p1_brake_y = (self.p1_standing_y + self.crouch_threshold) if self.p1_standing_y is not None else 0.58
-        p2_brake_y = (self.p2_standing_y + self.crouch_threshold) if self.p2_standing_y is not None else 0.58
+        p1_is_calib = (
+            calib.status == CalibrationStatus.CALIBRATING
+            or self.calibrator.is_calibration_pose(p1)
+        )
+        p2_is_calib = (
+            calib.status == CalibrationStatus.CALIBRATING
+            or self.calibrator.is_calibration_pose(p2)
+        )
 
-        p1_brake = False
-        p2_brake = False
-        rescue = False
-
-        if p1_hip:
-            if self.p1_standing_y is None:
-                self.p1_standing_y = p1_hip[1]
-                p1_brake_y = self.p1_standing_y + self.crouch_threshold
-
-            if p1_hip[1] > p1_brake_y:
-                p1_brake = True
-
-            if self.p1_prev_y is not None and (self.p1_prev_y - p1_hip[1]) > self.jump_velocity:
-                rescue = True
-            self.p1_prev_y = p1_hip[1]
-        else:
-            self.p1_prev_y = None
-
-        if p2_hip:
-            if self.p2_standing_y is None:
-                self.p2_standing_y = p2_hip[1]
-                p2_brake_y = self.p2_standing_y + self.crouch_threshold
-
-            if p2_hip[1] > p2_brake_y:
-                p2_brake = True
-
-            if self.p2_prev_y is not None and (self.p2_prev_y - p2_hip[1]) > self.jump_velocity:
-                rescue = True
-            self.p2_prev_y = p2_hip[1]
-        else:
-            self.p2_prev_y = None
+        p1_brake, p1_jump, p1_brake_y, p1_jump_y = self.vertical_detector.evaluate_player(
+            p1, calib.p1_standing_y, is_calibrating=p1_is_calib
+        )
+        p2_brake, p2_jump, p2_brake_y, p2_jump_y = self.vertical_detector.evaluate_player(
+            p2, calib.p2_standing_y, is_calibrating=p2_is_calib
+        )
 
         brake = p1_brake or p2_brake
+        rescue = p1_jump or p2_jump
         accelerate = self.cruise_control and not brake
 
-        return {
-            "steer": steer,
-            "steer_intensity": steer_intensity,
-            "steer_active": steer_active,
-            "p1_power": p1_left_power,
-            "p2_power": p2_right_power,
-            "accelerate": accelerate,
-            "cruise_control": self.cruise_control,
-            "brake": brake,
-            "rescue": rescue,
-            "p1_hip": p1_hip,
-            "p2_hip": p2_hip,
-            "p1_brake": p1_brake,
-            "p2_brake": p2_brake,
-            "p1_brake_y": p1_brake_y,
-            "p2_brake_y": p2_brake_y,
-            "left_thresh": left_thresh,
-            "right_thresh": right_thresh,
-            "calibrated": self.calibrated,
-            "just_calibrated": just_calibrated,
-            "t_pose_progress": min(1.0, self.t_pose_counter / 30.0),
-        }
+        return GestureResult(
+            steering=steering,
+            accelerate=accelerate,
+            cruise_control=self.cruise_control,
+            brake=brake,
+            rescue=rescue,
+            p1_brake=p1_brake,
+            p2_brake=p2_brake,
+            p1_brake_y=p1_brake_y,
+            p2_brake_y=p2_brake_y,
+            p1_jump=p1_jump,
+            p2_jump=p2_jump,
+            p1_jump_y=p1_jump_y,
+            p2_jump_y=p2_jump_y,
+            p1_shoulder=p1.shoulder if p1 else None,
+            p2_shoulder=p2.shoulder if p2 else None,
+            p1_hip=p1.hip if p1 else None,
+            p2_hip=p2.hip if p2 else None,
+            calibration=calib,
+        )
 
 
 def main():
-    cam = Camera()
-    if not cam.is_opened():
-        return
+    import cv2
 
-    tracker = PoseTracker()
-    detector = DuoGestureDetector()
+    with Camera() as cam:
+        if not cam.is_opened():
+            return
 
-    COLOR_P1 = (255, 255, 0)
-    COLOR_P2 = (255, 0, 255)
+        tracker = PoseTracker()
+        detector = DuoGestureDetector()
+        hud = HUD()
 
-    while True:
-        ret, frame = cam.read()
-        if not ret:
-            break
+        prev = time.time()
+        fps = 0.0
 
-        p1, p2 = tracker.process(frame)
-        gestures = detector.detect(p1, p2)
+        while True:
+            ret, frame = cam.read()
+            if not ret:
+                break
 
-        tracker.draw_player(frame, p1, COLOR_P1, "P1 (Left Steer)")
-        tracker.draw_player(frame, p2, COLOR_P2, "P2 (Right Steer)")
+            p1, p2 = tracker.process(frame)
+            gestures = detector.detect(p1, p2)
 
-        h, w, _ = frame.shape
+            now = time.time()
+            dt = now - prev
+            prev = now
+            if dt > 0:
+                fps = 0.9 * fps + 0.1 * (1.0 / dt) if fps > 0 else 1.0 / dt
 
-        # Vertical action boundary lines & Neutral Zone
-        lx = int(gestures["left_thresh"] * w)
-        rx = int(gestures["right_thresh"] * w)
-        cv2.line(frame, (lx, 0), (lx, h), (120, 120, 120), 1)
-        cv2.line(frame, (rx, 0), (rx, h), (120, 120, 120), 1)
+            hud.render(frame, p1, p2, gestures, fps, detector.steer_margin)
 
-        nz_mid = (lx + rx) // 2
-        cv2.putText(frame, "NEUTRAL ZONE", (nz_mid - 65, h - 20),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (160, 160, 160), 1)
+            cv2.imshow("Gestures Test", frame)
+            key = cv2.waitKey(1) & 0xFF
+            if key in (ord("q"), 27):
+                break
+            elif key in (ord("c"), ord("C")):
+                detector.calibrate(p1, p2)
+            elif key in (ord("a"), ord("A")):
+                detector.cruise_control = not detector.cruise_control
 
-        # Full-lock margin lines
-        left_max_px = int(detector.steer_margin * w)
-        right_max_px = int((1.0 - detector.steer_margin) * w)
-        cv2.line(frame, (left_max_px, 0), (left_max_px, h), (40, 40, 120), 1)
-        cv2.line(frame, (right_max_px, 0), (right_max_px, h), (40, 40, 120), 1)
-
-        # Hip points & horizontal brake lines
-        if gestures["p1_hip"]:
-            hx, hy = gestures["p1_hip"]
-            h_px = (int(hx * w), int(hy * w if hy * w < h else hy * h))
-            h_px = (int(hx * w), int(hy * h))
-            col = (0, 0, 255) if gestures["p1_brake"] else (0, 255, 255)
-            cv2.circle(frame, h_px, 7, col, -1)
-
-            b_y = int(gestures["p1_brake_y"] * h)
-            b_col = (0, 0, 255) if gestures["p1_brake"] else (80, 80, 80)
-            cv2.line(frame, (0, b_y), (w // 2, b_y), b_col, 1)
-            cv2.putText(frame, "P1 BRAKE", (10, b_y - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.4, b_col, 1)
-
-        if gestures["p2_hip"]:
-            hx, hy = gestures["p2_hip"]
-            h_px = (int(hx * w), int(hy * h))
-            col = (0, 0, 255) if gestures["p2_brake"] else (255, 0, 255)
-            cv2.circle(frame, h_px, 7, col, -1)
-
-            b_y = int(gestures["p2_brake_y"] * h)
-            b_col = (0, 0, 255) if gestures["p2_brake"] else (80, 80, 80)
-            cv2.line(frame, (w // 2, b_y), (w, b_y), b_col, 1)
-            cv2.putText(frame, "P2 BRAKE", (w - 90, b_y - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.4, b_col, 1)
-
-        p1_pct = int(gestures["p1_power"] * 100)
-        p2_pct = int(gestures["p2_power"] * 100)
-        cv2.putText(frame, f"P1 Left: {p1_pct}%", (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.65, COLOR_P1, 2)
-        cv2.putText(frame, f"P2 Right: {p2_pct}%", (w - 200, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.65, COLOR_P2, 2)
-
-        if gestures["steer"]:
-            net_pct = int(gestures["steer_intensity"] * 100)
-            active_str = "●" if gestures["steer_active"] else "○"
-            col = (0, 255, 0) if gestures["steer_active"] else (120, 200, 120)
-            text = f"NET: {gestures['steer']} {net_pct}% {active_str}"
-            cv2.putText(frame, text, (w // 2 - 110, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.7, col, 2)
-        else:
-            cv2.putText(frame, "NET: STRAIGHT", (w // 2 - 80, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (180, 180, 180), 2)
-
-        if gestures["accelerate"]:
-            cv2.putText(frame, "ACCEL: ON [CRUISE]", (20, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-        elif gestures["cruise_control"] and gestures["brake"]:
-            cv2.putText(frame, "ACCEL: PAUSED (BRAKE)", (20, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
-        else:
-            cv2.putText(frame, "ACCEL: OFF [Raise Hand]", (20, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (80, 80, 80), 2)
-
-        cv2.putText(frame, "BRAKE", (20, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
-                    (0, 0, 255) if gestures["brake"] else (80, 80, 80), 2)
-        cv2.putText(frame, "RESCUE", (20, 125), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
-                    (0, 165, 255) if gestures["rescue"] else (80, 80, 80), 2)
-
-        if gestures["t_pose_progress"] > 0:
-            prog = int(gestures["t_pose_progress"] * 100)
-            cv2.putText(frame, f"CALIBRATING: {prog}%", (w // 2 - 90, 70),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2)
-        elif detector.calibrated:
-            cv2.putText(frame, "CALIBRATED ('c' to reset)", (w // 2 - 100, 70),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 1)
-
-        cv2.imshow("Gestures Test", frame)
-        key = cv2.waitKey(1) & 0xFF
-        if key in (ord('q'), 27):
-            break
-        elif key in (ord('c'), ord('C')):
-            detector.calibrate(p1, p2)
-        elif key in (ord('a'), ord('A')):
-            detector.cruise_control = not detector.cruise_control
-
-    cam.release()
     cv2.destroyAllWindows()
 
 
