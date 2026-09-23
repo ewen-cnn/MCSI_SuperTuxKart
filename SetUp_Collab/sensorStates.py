@@ -6,7 +6,6 @@ class vibrationSensor:
     def get_state(self):
         return self.state
 
-    def interaction()
 
 
 class MuscleSensor:
