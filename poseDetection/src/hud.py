@@ -24,6 +24,19 @@ COLOR_JUMP_ACTIVE = (0, 255, 255)
 class HUD:
     """Renders overlays, player skeletons, dynamic thresholds, and telemetry badges."""
 
+    def __init__(self):
+        self.banner_message: Optional[str] = None
+        self.banner_expires: float = 0.0
+        self.banner_color: Tuple[int, int, int] = COLOR_OK
+
+    def show_message(
+        self, text: str, duration: float = 3.0, color: Tuple[int, int, int] = COLOR_OK
+    ):
+        import time
+        self.banner_message = text
+        self.banner_expires = time.time() + duration
+        self.banner_color = color
+
     @staticmethod
     def draw_badge(
         frame,
@@ -117,6 +130,32 @@ class HUD:
         HUD.draw_badge(frame, "MAX RIGHT", (right_max_px - 65, h - 35), COLOR_MARGIN, font_scale=0.35)
 
     @staticmethod
+    def draw_card(
+        frame,
+        bbox: Optional[Tuple[int, int, int, int]],
+        triggered: bool = False,
+    ):
+        if bbox is None:
+            return
+
+        x, y, w, h = bbox
+        color = COLOR_WARN if triggered else COLOR_OK
+        thick = 3 if triggered else 2
+        cv2.rectangle(frame, (x, y), (x + w, y + h), color, thick)
+
+        label = "RESCUE CARD [ACTIVE]" if triggered else "RESCUE CARD"
+        HUD.draw_badge(
+            frame,
+            label,
+            (x, max(20, y - 6)),
+            (0, 0, 0) if triggered else (255, 255, 255),
+            bg_color=(0, 215, 255) if triggered else (20, 20, 20),
+            border_color=color,
+            font_scale=0.45,
+            thickness=2 if triggered else 1,
+        )
+
+    @staticmethod
     def draw_player_thresholds(
         frame,
         shoulder: Optional[Tuple[float, float]],
@@ -125,6 +164,7 @@ class HUD:
         jump_active: bool,
         jump_y: float,
         is_p1: bool,
+        show_jump_line: bool = True,
     ):
         h, w, _ = frame.shape
         start_x = 0 if is_p1 else w // 2
@@ -132,24 +172,25 @@ class HUD:
         prefix = "P1" if is_p1 else "P2"
         badge_x = 10 if is_p1 else (w - 110)
 
-        # Jump line
-        j_y_px = int(jump_y * h)
-        j_color = COLOR_JUMP_ACTIVE if jump_active else COLOR_JUMP_INACTIVE
-        j_thick = 3 if jump_active else 2
-        cv2.line(frame, (start_x, j_y_px), (end_x, j_y_px), j_color, j_thick, cv2.LINE_AA)
+        # Jump line (hidden if color rescue mode is enabled)
+        if show_jump_line:
+            j_y_px = int(jump_y * h)
+            j_color = COLOR_JUMP_ACTIVE if jump_active else COLOR_JUMP_INACTIVE
+            j_thick = 3 if jump_active else 2
+            cv2.line(frame, (start_x, j_y_px), (end_x, j_y_px), j_color, j_thick, cv2.LINE_AA)
 
-        j_bg = (0, 180, 220) if jump_active else (25, 25, 25)
-        j_fg = (0, 0, 0) if jump_active else j_color
-        HUD.draw_badge(
-            frame,
-            f"▲ {prefix} JUMP",
-            (badge_x, j_y_px - 6),
-            j_fg,
-            bg_color=j_bg,
-            border_color=j_color,
-            font_scale=0.42,
-            thickness=2 if jump_active else 1,
-        )
+            j_bg = (0, 180, 220) if jump_active else (25, 25, 25)
+            j_fg = (0, 0, 0) if jump_active else j_color
+            HUD.draw_badge(
+                frame,
+                f"▲ {prefix} JUMP",
+                (badge_x, j_y_px - 6),
+                j_fg,
+                bg_color=j_bg,
+                border_color=j_color,
+                font_scale=0.42,
+                thickness=2 if jump_active else 1,
+            )
 
         # Brake line
         b_y_px = int(brake_y * h)
@@ -176,7 +217,7 @@ class HUD:
             center = (int(sx * w), int(sy * h))
             if brake_active:
                 dot_color = COLOR_ALERT
-            elif jump_active:
+            elif jump_active and show_jump_line:
                 dot_color = COLOR_JUMP_ACTIVE
             else:
                 dot_color = COLOR_P1 if is_p1 else COLOR_P2
@@ -225,15 +266,42 @@ class HUD:
             thickness=2 if gestures.brake else 1,
         )
 
-        # Rescue/Jump badge
-        rescue_col = COLOR_WARN if gestures.rescue else COLOR_DIM
+        # Rescue badge
+        if gestures.rescue_mode == "color":
+            if gestures.rescue:
+                rescue_label = "RESCUE [CARD]: ACTIVE"
+                rescue_col = COLOR_WARN
+            elif gestures.card_detected:
+                rescue_label = "RESCUE [CARD]: DETECTED"
+                rescue_col = COLOR_OK
+            else:
+                rescue_label = "RESCUE [CARD]: IDLE"
+                rescue_col = COLOR_DIM
+        elif gestures.rescue_mode == "jump":
+            rescue_label = "RESCUE [JUMP]: ACTIVE" if gestures.rescue else "RESCUE [JUMP]: IDLE"
+            rescue_col = COLOR_WARN if gestures.rescue else COLOR_DIM
+        else:
+            rescue_label = "RESCUE: ACTIVE" if gestures.rescue else "RESCUE [BOTH]: IDLE"
+            rescue_col = COLOR_WARN if gestures.rescue else COLOR_DIM
+
         HUD.draw_badge(
             frame,
-            "JUMP / RESCUE: ACTIVE" if gestures.rescue else "JUMP / RESCUE",
+            rescue_label,
             (20, 130),
             rescue_col,
             font_scale=0.5,
             thickness=2 if gestures.rescue else 1,
+        )
+
+        # Rescue mode indicator badge
+        mode_str = gestures.rescue_mode.upper()
+        HUD.draw_badge(
+            frame,
+            f"RESCUE: {mode_str} ('r')",
+            (w - 180, 25),
+            COLOR_OK if gestures.rescue_mode == "color" else COLOR_WARN,
+            font_scale=0.45,
+            thickness=1,
         )
 
         # Calibration progress or resting status
@@ -282,6 +350,37 @@ class HUD:
                     frame, "CALIBRATED ('c' to reset)", (w // 2 - 80, 65), COLOR_OK, font_scale=0.45
                 )
 
+    @staticmethod
+    def draw_sample_reticle(frame, box_size: int = 80):
+
+        h, w = frame.shape[:2]
+        cx, cy = w // 2, h // 2
+        half = box_size // 2
+        x1, y1 = cx - half, cy - half
+        x2, y2 = cx + half, cy + half
+        arm = 14
+        col = (180, 180, 180)
+
+        # Corner brackets
+        cv2.line(frame, (x1, y1), (x1 + arm, y1), col, 2, cv2.LINE_AA)
+        cv2.line(frame, (x1, y1), (x1, y1 + arm), col, 2, cv2.LINE_AA)
+        cv2.line(frame, (x2, y1), (x2 - arm, y1), col, 2, cv2.LINE_AA)
+        cv2.line(frame, (x2, y1), (x2, y1 + arm), col, 2, cv2.LINE_AA)
+        cv2.line(frame, (x1, y2), (x1 + arm, y2), col, 2, cv2.LINE_AA)
+        cv2.line(frame, (x1, y2), (x1, y2 - arm), col, 2, cv2.LINE_AA)
+        cv2.line(frame, (x2, y2), (x2 - arm, y2), col, 2, cv2.LINE_AA)
+        cv2.line(frame, (x2, y2), (x2, y2 - arm), col, 2, cv2.LINE_AA)
+
+        HUD.draw_badge(
+            frame,
+            "HOLD CARD & PRESS 'S'",
+            (cx - 75, y2 + 16),
+            (200, 200, 200),
+            bg_color=(20, 20, 20),
+            font_scale=0.38,
+            thickness=1,
+        )
+
     def render(
         self,
         frame,
@@ -298,6 +397,8 @@ class HUD:
         right_thresh = gestures.calibration.right_thresh if gestures.calibration else 0.71
         self.draw_zones(frame, left_thresh, right_thresh, steer_margin)
 
+        show_jump_line = gestures.rescue_mode != "color"
+
         self.draw_player_thresholds(
             frame=frame,
             shoulder=gestures.p1_shoulder,
@@ -306,6 +407,7 @@ class HUD:
             jump_active=gestures.p1_jump,
             jump_y=gestures.p1_jump_y,
             is_p1=True,
+            show_jump_line=show_jump_line,
         )
         self.draw_player_thresholds(
             frame=frame,
@@ -315,6 +417,28 @@ class HUD:
             jump_active=gestures.p2_jump,
             jump_y=gestures.p2_jump_y,
             is_p1=False,
+            show_jump_line=show_jump_line,
         )
 
+        if gestures.rescue_mode == "color" and not gestures.card_detected:
+            self.draw_sample_reticle(frame)
+
+        if gestures.card_detected and gestures.card_bbox:
+            self.draw_card(frame, gestures.card_bbox, triggered=gestures.rescue)
+
+        import time
+        if self.banner_message and time.time() < self.banner_expires:
+            HUD.draw_badge(
+                frame,
+                self.banner_message,
+                (frame.shape[1] // 2 - 150, 60),
+                self.banner_color,
+                bg_color=(15, 15, 15),
+                border_color=self.banner_color,
+                font_scale=0.55,
+                thickness=2,
+            )
+
         self.draw_telemetry(frame, gestures, fps)
+
+
