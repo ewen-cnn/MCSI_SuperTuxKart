@@ -167,3 +167,6 @@ class GestureResult:
     p1_hip: Optional[Tuple[float, float]] = None
     p2_hip: Optional[Tuple[float, float]] = None
     calibration: Optional[CalibrationState] = None
+    card_detected: bool = False
+    card_bbox: Optional[Tuple[int, int, int, int]] = None
+    rescue_mode: str = "color"
