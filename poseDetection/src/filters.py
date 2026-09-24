@@ -3,7 +3,7 @@ import time
 from typing import Optional, List
 
 from config import FilterConfig
-from pose_types import Point3D, PlayerPose
+from pose_types import Point3D, PlayerPose, PlayerFace
 
 
 class LowPassFilter:
@@ -134,3 +134,64 @@ class PoseSmoother:
     def reset(self):
         for f in self.point_filters:
             f.reset()
+
+
+class FaceSmoother:
+    """Smoothes keypoints, center coordinates, and roll angle of a PlayerFace."""
+
+    def __init__(self, config: FilterConfig = FilterConfig()):
+        self.config = config
+        self.nose_filter = PointFilter(config.min_cutoff, config.beta, config.d_cutoff)
+        self.left_eye_filter = PointFilter(config.min_cutoff, config.beta, config.d_cutoff)
+        self.right_eye_filter = PointFilter(config.min_cutoff, config.beta, config.d_cutoff)
+        self.mouth_filter = PointFilter(config.min_cutoff, config.beta, config.d_cutoff)
+        self.center_x_filter = OneEuroFilter(config.min_cutoff, config.beta, config.d_cutoff)
+        self.center_y_filter = OneEuroFilter(config.min_cutoff, config.beta, config.d_cutoff)
+        self.roll_filter = OneEuroFilter(config.min_cutoff, config.beta, config.d_cutoff)
+        self.last_seen: float = 0.0
+
+    def smooth(
+        self, face: Optional[PlayerFace], timestamp: Optional[float] = None
+    ) -> Optional[PlayerFace]:
+        if face is None:
+            return None
+
+        if timestamp is None:
+            timestamp = time.time()
+
+        if (timestamp - self.last_seen) > self.config.timeout_seconds:
+            self.reset()
+        self.last_seen = timestamp
+
+        s_nose = self.nose_filter.filter(face.nose, timestamp)
+        s_left_eye = self.left_eye_filter.filter(face.left_eye, timestamp)
+        s_right_eye = self.right_eye_filter.filter(face.right_eye, timestamp)
+        s_mouth = self.mouth_filter.filter(face.mouth, timestamp)
+        s_cx = self.center_x_filter.filter(face.center_x, timestamp)
+        s_cy = self.center_y_filter.filter(face.center_y, timestamp)
+        s_roll = self.roll_filter.filter(face.roll_angle, timestamp)
+
+        return PlayerFace(
+            nose=s_nose,
+            left_eye=s_left_eye,
+            right_eye=s_right_eye,
+            mouth=s_mouth,
+            right_ear=face.right_ear,
+            left_ear=face.left_ear,
+            center_x=s_cx,
+            center_y=s_cy,
+            bbox=face.bbox,
+            roll_angle=s_roll,
+            size=face.size,
+            confidence=face.confidence,
+            landmarks=face.landmarks,
+        )
+
+    def reset(self):
+        self.nose_filter.reset()
+        self.left_eye_filter.reset()
+        self.right_eye_filter.reset()
+        self.mouth_filter.reset()
+        self.center_x_filter.reset()
+        self.center_y_filter.reset()
+        self.roll_filter.reset()

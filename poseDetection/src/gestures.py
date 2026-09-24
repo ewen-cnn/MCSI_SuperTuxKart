@@ -1,9 +1,9 @@
 import time
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 import numpy as np
 
 from config import AppConfig, SteeringConfig, GestureConfig, CalibrationConfig, ColorConfig
-from pose_types import PlayerPose, SteeringState, GestureResult, CalibrationStatus
+from pose_types import PlayerPose, PlayerFace, SteeringState, GestureResult, CalibrationStatus
 from calibration import CalibrationManager
 from color_detector import ColorCardDetector
 from capture import Camera
@@ -83,22 +83,22 @@ class SteeringEngine:
 
         if p1 is not None and p2 is not None:
             # Duo mode: P1 controls left, P2 controls right
-            if p1.hip_x < left_thresh:
-                p1_left_power = self._calc_power(p1.hip_x, left_thresh, margin, "LEFT")
-            if p2.hip_x > right_thresh:
-                p2_right_power = self._calc_power(p2.hip_x, right_thresh, margin, "RIGHT")
+            if p1.shoulder_x < left_thresh:
+                p1_left_power = self._calc_power(p1.shoulder_x, left_thresh, margin, "LEFT")
+            if p2.shoulder_x > right_thresh:
+                p2_right_power = self._calc_power(p2.shoulder_x, right_thresh, margin, "RIGHT")
         elif p1 is not None:
             # Solo mode (P1)
-            if p1.hip_x < left_thresh:
-                p1_left_power = self._calc_power(p1.hip_x, left_thresh, margin, "LEFT")
-            elif p1.hip_x > right_thresh:
-                p2_right_power = self._calc_power(p1.hip_x, right_thresh, margin, "RIGHT")
+            if p1.shoulder_x < left_thresh:
+                p1_left_power = self._calc_power(p1.shoulder_x, left_thresh, margin, "LEFT")
+            elif p1.shoulder_x > right_thresh:
+                p2_right_power = self._calc_power(p1.shoulder_x, right_thresh, margin, "RIGHT")
         elif p2 is not None:
             # Solo mode (P2)
-            if p2.hip_x < left_thresh:
-                p1_left_power = self._calc_power(p2.hip_x, left_thresh, margin, "LEFT")
-            elif p2.hip_x > right_thresh:
-                p2_right_power = self._calc_power(p2.hip_x, right_thresh, margin, "RIGHT")
+            if p2.shoulder_x < left_thresh:
+                p1_left_power = self._calc_power(p2.shoulder_x, left_thresh, margin, "LEFT")
+            elif p2.shoulder_x > right_thresh:
+                p2_right_power = self._calc_power(p2.shoulder_x, right_thresh, margin, "RIGHT")
 
         net = p1_left_power - p2_right_power
         direction = None
@@ -130,21 +130,22 @@ class VerticalActionDetector:
 
     def evaluate_player(
         self,
-        pose: Optional[PlayerPose],
+        pose: Optional[Union[PlayerPose, PlayerFace]],
         standing_y: Optional[float],
         is_calibrating: bool = False,
     ) -> Tuple[bool, bool, float, float]:
         """Calculates (brake_active, jump_active, brake_y, jump_y) for a player."""
         base_y = standing_y if standing_y is not None else self.config.default_standing_y
-        brake_y = base_y + self.config.crouch_threshold
-        jump_y = base_y - self.config.jump_threshold
+        brake_y = getattr(self.config, "default_brake_y", base_y + self.config.crouch_threshold)
+        jump_y = getattr(self.config, "default_jump_y", base_y - self.config.jump_threshold)
 
         brake = False
         jump = False
         if pose is not None and not is_calibrating:
-            if pose.shoulder_y > brake_y:
+            pos_y = pose.head_y if hasattr(pose, "head_y") else pose.shoulder_y
+            if pos_y > brake_y:
                 brake = True
-            elif pose.shoulder_y < jump_y:
+            elif pos_y < jump_y:
                 jump = True
 
         return brake, jump, brake_y, jump_y
@@ -187,6 +188,23 @@ class DuoGestureDetector:
         else:
             self.rescue_mode = "color"
         return self.rescue_mode
+
+    def toggle_card_detection(self) -> bool:
+        """Toggles color card detection on or off."""
+        self.color_detector.config.enabled = not self.color_detector.config.enabled
+        if not self.color_detector.config.enabled and self.rescue_mode == "color":
+            self.rescue_mode = "jump"
+        elif self.color_detector.config.enabled and self.rescue_mode == "jump":
+            self.rescue_mode = "color"
+        return self.color_detector.config.enabled
+
+    def set_card_detection(self, enabled: bool):
+        """Explicitly enables or disables color card detection."""
+        self.color_detector.config.enabled = enabled
+        if not enabled and self.rescue_mode == "color":
+            self.rescue_mode = "jump"
+        elif enabled and self.rescue_mode == "jump":
+            self.rescue_mode = "color"
 
     def sample_card_color(self, frame: Optional[np.ndarray], box_size: int = 80) -> Tuple[bool, str]:
         """Samples card color from the center of the frame and updates HSV thresholds."""
@@ -288,7 +306,8 @@ class DuoGestureDetector:
         card_triggered = False
         card_detected = False
         card_bbox = None
-        if frame is not None:
+        card_enabled = bool(getattr(self.color_detector.config, "enabled", True))
+        if frame is not None and card_enabled:
             card_triggered, card_detected, card_bbox = self.color_detector.detect(
                 frame, timestamp=timestamp
             )
@@ -296,9 +315,9 @@ class DuoGestureDetector:
         brake = p1_brake or p2_brake
         jump_triggered = p1_jump or p2_jump
 
-        if self.rescue_mode == "color":
+        if self.rescue_mode == "color" and card_enabled:
             rescue = card_triggered
-        elif self.rescue_mode == "jump":
+        elif self.rescue_mode == "jump" or not card_enabled:
             rescue = jump_triggered
         elif self.rescue_mode == "both":
             rescue = jump_triggered or card_triggered
@@ -328,7 +347,10 @@ class DuoGestureDetector:
             calibration=calib,
             card_detected=card_detected,
             card_bbox=card_bbox,
+            card_enabled=card_enabled,
             rescue_mode=self.rescue_mode,
+            p1_face=p1 if isinstance(p1, PlayerFace) else None,
+            p2_face=p2 if isinstance(p2, PlayerFace) else None,
         )
 
 
@@ -352,14 +374,14 @@ def main():
             if not ret:
                 break
 
-            p1, p2 = tracker.process(frame)
-            gestures = detector.detect(p1, p2, frame=frame, timestamp=now)
-
             now = time.time()
             dt = now - prev
             prev = now
             if dt > 0:
                 fps = 0.9 * fps + 0.1 * (1.0 / dt) if fps > 0 else 1.0 / dt
+
+            p1, p2 = tracker.process(frame, timestamp=now)
+            gestures = detector.detect(p1, p2, frame=frame, timestamp=now)
 
             hud.render(frame, p1, p2, gestures, fps, detector.steer_margin)
 

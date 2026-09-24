@@ -12,8 +12,11 @@ class CameraConfig:
 
 @dataclass
 class SteeringConfig:
-    deadzone: float = 0.06
-    margin: float = 0.10
+    deadzone: float = 0.05
+    margin: float = 0.08
+    p1_center_x: float = 0.28
+    p2_center_x: float = 0.72
+    fixed_lines: bool = True
     pwm_period: float = 0.15
     net_deadband: float = 0.01
     full_steer_intensity: float = 0.98
@@ -21,19 +24,20 @@ class SteeringConfig:
 
 @dataclass
 class GestureConfig:
-    crouch_threshold: float = 0.045
-    jump_threshold: float = 0.045
-    default_standing_y: float = 0.34
+    crouch_threshold: float = 0.08
+    jump_threshold: float = 0.08
+    default_standing_y: float = 0.40
     default_torso_height: float = 0.28
-    default_brake_y: float = 0.39
-    default_jump_y: float = 0.29
+    default_brake_y: float = 0.50
+    default_jump_y: float = 0.30
     rescue_mode: str = "color"
 
 
 @dataclass
 class ColorConfig:
-    enabled: bool = True
-    preset: str = "green"
+    enabled: bool = True  # Set to False to disable card detection and all card overlays
+    show_reticle: bool = False  # Set to False to hide the center 'HOLD CARD' reticle box
+    preset: str = "orange"
     lower_hsv: Tuple[int, int, int] = (40, 80, 60)
     upper_hsv: Tuple[int, int, int] = (82, 255, 255)
     min_area: int = 180
@@ -46,17 +50,16 @@ class ColorConfig:
 
 
 @dataclass
-
 class CalibrationConfig:
-    frames_required: int = 30
-    cooldown_seconds: float = 3.0
-    default_p1_neutral_x: float = 0.35
-    default_p2_neutral_x: float = 0.65
-    wrist_margin_y: float = 0.08
-    hip_margin_y: float = 0.04
-    shoulder_margin_x: float = 0.06
-    cross_offset: float = 0.06
-    prayer_max_distance: float = 0.10
+    fixed_mode: bool = True
+    default_p1_neutral_x: float = 0.28
+    default_p2_neutral_x: float = 0.72
+    default_p1_standing_y: float = 0.40
+    default_p2_standing_y: float = 0.40
+    default_p1_brake_y: float = 0.50
+    default_p2_brake_y: float = 0.50
+    default_p1_jump_y: float = 0.30
+    default_p2_jump_y: float = 0.30
 
 
 @dataclass
@@ -70,9 +73,11 @@ class FilterConfig:
 @dataclass
 class TrackerConfig:
     num_poses: int = 4
-    min_player_size: float = 0.12
+    min_shoulder_span: float = 0.14
+    max_depth_z: float = 0.30
     min_detection_confidence: float = 0.5
     min_tracking_confidence: float = 0.5
+    min_player_size: float = 0.10
 
 
 @dataclass
