@@ -17,6 +17,8 @@ def run_controller(config: Optional[AppConfig] = None):
     print("Controls:")
     print("  'c' / 'C' : Force immediate baseline calibration")
     print("  'a' / 'A' : Toggle cruise control (acceleration)")
+    print("  'r' / 'R' : Toggle rescue mode (color card vs physical jump)")
+    print("  's' / 'S' : Calibrate/sample card color in center box")
     print("  'q' / ESC : Exit application\n")
 
     with Camera(cfg.camera) as cam, STKClient(cfg.network) as client:
@@ -44,7 +46,7 @@ def run_controller(config: Optional[AppConfig] = None):
                     fps = 0.9 * fps + 0.1 * (1.0 / dt) if fps > 0 else 1.0 / dt
 
                 p1, p2 = tracker.process(frame, timestamp=now)
-                gestures = detector.detect(p1, p2, timestamp=now)
+                gestures = detector.detect(p1, p2, frame=frame, timestamp=now)
 
                 # Map gestures to SuperTuxKart actions
                 actions = set()
@@ -69,6 +71,18 @@ def run_controller(config: Optional[AppConfig] = None):
                     detector.calibrate(p1, p2, timestamp=now)
                 elif key in (ord("a"), ord("A")):
                     detector.cruise_control = not detector.cruise_control
+                elif key in (ord("r"), ord("R")):
+                    new_mode = detector.toggle_rescue_mode()
+                    print(f"Rescue mode toggled to: {new_mode.upper()}")
+                elif key in (ord("s"), ord("S")):
+                    success, msg = detector.sample_card_color(frame)
+                    print(f"[Color Calibration] {msg}")
+                    hud.show_message(
+                        msg,
+                        duration=3.0,
+                        color=(0, 255, 0) if success else (0, 0, 255),
+                    )
+
         finally:
             cv2.destroyAllWindows()
 
