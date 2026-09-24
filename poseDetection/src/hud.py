@@ -24,10 +24,15 @@ COLOR_JUMP_ACTIVE = (0, 255, 255)
 class HUD:
     """Renders overlays, player skeletons, dynamic thresholds, and telemetry badges."""
 
-    def __init__(self):
+    def __init__(self, show_reticle: bool = False):
         self.banner_message: Optional[str] = None
         self.banner_expires: float = 0.0
         self.banner_color: Tuple[int, int, int] = COLOR_OK
+        self.show_reticle: bool = show_reticle
+
+    def toggle_reticle(self) -> bool:
+        self.show_reticle = not self.show_reticle
+        return self.show_reticle
 
     def show_message(
         self, text: str, duration: float = 3.0, color: Tuple[int, int, int] = COLOR_OK
@@ -105,23 +110,47 @@ class HUD:
             )
 
     @staticmethod
-    def draw_zones(frame, left_thresh: float, right_thresh: float, steer_margin: float):
+    def draw_zones(
+        frame,
+        left_thresh: float,
+        right_thresh: float,
+        steer_margin: float,
+        p1_neutral_x: float = 0.28,
+        p2_neutral_x: float = 0.72,
+    ):
         h, w, _ = frame.shape
-        lx = int(left_thresh * w)
-        rx = int(right_thresh * w)
-
         overlay = frame.copy()
-        cv2.rectangle(overlay, (lx, 0), (rx, h), COLOR_NEUTRAL_BG, -1)
-        cv2.addWeighted(overlay, 0.25, frame, 0.75, 0, frame)
 
-        cv2.line(frame, (lx, 0), (lx, h), COLOR_NEUTRAL_LINE, 2, cv2.LINE_AA)
-        cv2.line(frame, (rx, 0), (rx, h), COLOR_NEUTRAL_LINE, 2, cv2.LINE_AA)
+        # Center split divider between P1 and P2 domains
+        mid_x = w // 2
+        for y_seg in range(0, h, 16):
+            cv2.line(frame, (mid_x, y_seg), (mid_x, min(h, y_seg + 8)), (70, 70, 70), 1, cv2.LINE_AA)
 
-        nz_mid = (lx + rx) // 2
+        # P1 Fixed Neutral Box (Left)
+        deadzone_p1 = max(0.02, abs(p1_neutral_x - left_thresh))
+        p1_l = int((p1_neutral_x - deadzone_p1) * w)
+        p1_r = int((p1_neutral_x + deadzone_p1) * w)
+        cv2.rectangle(overlay, (p1_l, 0), (p1_r, h), COLOR_NEUTRAL_BG, -1)
+        cv2.line(frame, (p1_l, 0), (p1_l, h), COLOR_NEUTRAL_LINE, 2, cv2.LINE_AA)
+        cv2.line(frame, (p1_r, 0), (p1_r, h), (90, 90, 90), 1, cv2.LINE_AA)
         HUD.draw_badge(
-            frame, "◄ NEUTRAL ZONE ►", (nz_mid - 65, h - 15), (220, 220, 220), bg_color=(30, 30, 30)
+            frame, "◄ P1 NEUTRAL ►", ((p1_l + p1_r) // 2 - 50, h - 15), (220, 220, 220), font_scale=0.38
         )
 
+        # P2 Fixed Neutral Box (Right)
+        deadzone_p2 = max(0.02, abs(right_thresh - p2_neutral_x))
+        p2_l = int((p2_neutral_x - deadzone_p2) * w)
+        p2_r = int((p2_neutral_x + deadzone_p2) * w)
+        cv2.rectangle(overlay, (p2_l, 0), (p2_r, h), COLOR_NEUTRAL_BG, -1)
+        cv2.line(frame, (p2_l, 0), (p2_l, h), (90, 90, 90), 1, cv2.LINE_AA)
+        cv2.line(frame, (p2_r, 0), (p2_r, h), COLOR_NEUTRAL_LINE, 2, cv2.LINE_AA)
+        HUD.draw_badge(
+            frame, "◄ P2 NEUTRAL ►", ((p2_l + p2_r) // 2 - 50, h - 15), (220, 220, 220), font_scale=0.38
+        )
+
+        cv2.addWeighted(overlay, 0.20, frame, 0.80, 0, frame)
+
+        # Margin lines for maximum steering
         left_max_px = int(steer_margin * w)
         right_max_px = int((1.0 - steer_margin) * w)
         cv2.line(frame, (left_max_px, 0), (left_max_px, h), COLOR_MARGIN, 2, cv2.LINE_AA)
@@ -304,7 +333,7 @@ class HUD:
             thickness=1,
         )
 
-        # Calibration progress or resting status
+        # Calibration status badge
         calib = gestures.calibration
         if calib:
             progress = calib.calib_pose_progress
@@ -347,7 +376,7 @@ class HUD:
                 )
             elif calib.status == CalibrationStatus.CALIBRATED:
                 HUD.draw_badge(
-                    frame, "CALIBRATED ('c' to reset)", (w // 2 - 80, 65), COLOR_OK, font_scale=0.45
+                    frame, "FIXED ZONES ('c': SNAP)", (w - 380, 25), COLOR_OK, font_scale=0.45, thickness=1
                 )
 
     @staticmethod
@@ -393,9 +422,18 @@ class HUD:
         self.draw_skeleton(frame, p1, COLOR_P1, "P1")
         self.draw_skeleton(frame, p2, COLOR_P2, "P2")
 
-        left_thresh = gestures.calibration.left_thresh if gestures.calibration else 0.29
-        right_thresh = gestures.calibration.right_thresh if gestures.calibration else 0.71
-        self.draw_zones(frame, left_thresh, right_thresh, steer_margin)
+        p1_nx = gestures.calibration.p1_neutral_x if gestures.calibration else 0.28
+        p2_nx = gestures.calibration.p2_neutral_x if gestures.calibration else 0.72
+        left_thresh = gestures.calibration.left_thresh if gestures.calibration else 0.23
+        right_thresh = gestures.calibration.right_thresh if gestures.calibration else 0.77
+        self.draw_zones(
+            frame,
+            left_thresh=left_thresh,
+            right_thresh=right_thresh,
+            steer_margin=steer_margin,
+            p1_neutral_x=p1_nx,
+            p2_neutral_x=p2_nx,
+        )
 
         show_jump_line = gestures.rescue_mode != "color"
 
@@ -420,11 +458,13 @@ class HUD:
             show_jump_line=show_jump_line,
         )
 
-        if gestures.rescue_mode == "color" and not gestures.card_detected:
-            self.draw_sample_reticle(frame)
+        # Card detection overlays (completely hidden when card detection is disabled)
+        if getattr(gestures, "card_enabled", True):
+            if self.show_reticle and gestures.rescue_mode == "color" and not gestures.card_detected:
+                self.draw_sample_reticle(frame)
 
-        if gestures.card_detected and gestures.card_bbox:
-            self.draw_card(frame, gestures.card_bbox, triggered=gestures.rescue)
+            if gestures.card_detected and gestures.card_bbox:
+                self.draw_card(frame, gestures.card_bbox, triggered=gestures.rescue)
 
         import time
         if self.banner_message and time.time() < self.banner_expires:

@@ -34,6 +34,96 @@ RIGHT_HIP_IDX = 24
 
 
 @dataclass
+class PlayerFace:
+    nose: Point3D
+    left_eye: Point3D
+    right_eye: Point3D
+    mouth: Point3D
+    right_ear: Point3D
+    left_ear: Point3D
+    center_x: float
+    center_y: float
+    bbox: Tuple[int, int, int, int]
+    roll_angle: float = 0.0
+    size: float = 0.1
+    confidence: float = 1.0
+    landmarks: Tuple[Point3D, ...] = ()
+
+    @property
+    def head_x(self) -> float:
+        return self.center_x
+
+    @property
+    def head_y(self) -> float:
+        return self.center_y
+
+    @property
+    def head(self) -> Tuple[float, float]:
+        return self.center_x, self.center_y
+
+    # Backward compatibility properties for pose consumers
+    @property
+    def hip_x(self) -> float:
+        return self.center_x
+
+    @property
+    def hip_y(self) -> float:
+        return self.center_y
+
+    @property
+    def shoulder_x(self) -> float:
+        return self.center_x
+
+    @property
+    def shoulder_y(self) -> float:
+        return self.center_y
+
+    @property
+    def shoulder(self) -> Tuple[float, float]:
+        return self.center_x, self.center_y
+
+    @property
+    def hip(self) -> Tuple[float, float]:
+        return self.center_x, self.center_y
+
+    @property
+    def torso_size(self) -> float:
+        return self.size
+
+    @property
+    def torso_y(self) -> float:
+        return self.center_y
+
+    @property
+    def shoulder_span(self) -> float:
+        return abs(self.left_eye.x - self.right_eye.x) * 2.0
+
+    @property
+    def left_shoulder(self) -> Point3D:
+        return Point3D(self.left_eye.x, self.center_y + 0.1)
+
+    @property
+    def right_shoulder(self) -> Point3D:
+        return Point3D(self.right_eye.x, self.center_y + 0.1)
+
+    @property
+    def left_wrist(self) -> Point3D:
+        return Point3D(self.center_x, self.center_y + 0.3)
+
+    @property
+    def right_wrist(self) -> Point3D:
+        return Point3D(self.center_x, self.center_y + 0.3)
+
+    @property
+    def left_hip(self) -> Point3D:
+        return Point3D(self.left_eye.x, self.center_y + 0.3)
+
+    @property
+    def right_hip(self) -> Point3D:
+        return Point3D(self.right_eye.x, self.center_y + 0.3)
+
+
+@dataclass
 class PlayerPose:
     left_shoulder: Point3D
     right_shoulder: Point3D
@@ -49,6 +139,18 @@ class PlayerPose:
     shoulder_y: float
     torso_size: float
     landmarks: Tuple[Point3D, ...]
+
+    @property
+    def head_x(self) -> float:
+        return self.nose.x
+
+    @property
+    def head_y(self) -> float:
+        return self.nose.y
+
+    @property
+    def head(self) -> Tuple[float, float]:
+        return self.nose.x, self.nose.y
 
     @property
     def hip(self) -> Tuple[float, float]:
@@ -67,6 +169,16 @@ class PlayerPose:
     def shoulder_span(self) -> float:
         """Horizontal distance between left and right shoulders."""
         return abs(self.left_shoulder.x - self.right_shoulder.x)
+
+    @property
+    def depth_z(self) -> float:
+        """Mean relative Z depth of upper body. Smaller/negative = closer to camera."""
+        return (self.left_shoulder.z + self.right_shoulder.z + self.nose.z) / 3.0
+
+    @property
+    def foreground_score(self) -> float:
+        """Score favoring players in the front (wide shoulders, close Z depth)."""
+        return self.shoulder_span - (self.depth_z * 0.2)
 
     @classmethod
     def from_landmarks(cls, raw_landmarks: Sequence[Any]) -> Optional["PlayerPose"]:
@@ -122,16 +234,21 @@ class CalibrationStatus(Enum):
 
 @dataclass
 class CalibrationState:
-    p1_neutral_x: float = 0.35
-    p2_neutral_x: float = 0.65
-    p1_standing_y: Optional[float] = None
-    p2_standing_y: Optional[float] = None
+    p1_neutral_x: float = 0.28
+    p2_neutral_x: float = 0.72
+    p1_standing_y: Optional[float] = 0.40
+    p2_standing_y: Optional[float] = 0.40
     calib_pose_counter: int = 0
     calib_pose_progress: float = 0.0
-    left_thresh: float = 0.29
-    right_thresh: float = 0.71
-    status: CalibrationStatus = CalibrationStatus.UNCALIBRATED
+    left_thresh: float = 0.23
+    right_thresh: float = 0.77
+    status: CalibrationStatus = CalibrationStatus.CALIBRATED
     cooldown_remaining: float = 0.0
+    fixed_mode: bool = True
+    p1_brake_y: float = 0.52
+    p2_brake_y: float = 0.52
+    p1_jump_y: float = 0.28
+    p2_jump_y: float = 0.28
 
     @property
     def is_calibrated(self) -> bool:
@@ -156,12 +273,12 @@ class GestureResult:
     rescue: bool = False
     p1_brake: bool = False
     p2_brake: bool = False
-    p1_brake_y: float = 0.39
-    p2_brake_y: float = 0.39
+    p1_brake_y: float = 0.52
+    p2_brake_y: float = 0.52
     p1_jump: bool = False
     p2_jump: bool = False
-    p1_jump_y: float = 0.29
-    p2_jump_y: float = 0.29
+    p1_jump_y: float = 0.28
+    p2_jump_y: float = 0.28
     p1_shoulder: Optional[Tuple[float, float]] = None
     p2_shoulder: Optional[Tuple[float, float]] = None
     p1_hip: Optional[Tuple[float, float]] = None
@@ -169,4 +286,7 @@ class GestureResult:
     calibration: Optional[CalibrationState] = None
     card_detected: bool = False
     card_bbox: Optional[Tuple[int, int, int, int]] = None
+    card_enabled: bool = True
     rescue_mode: str = "color"
+    p1_face: Optional[PlayerFace] = None
+    p2_face: Optional[PlayerFace] = None
