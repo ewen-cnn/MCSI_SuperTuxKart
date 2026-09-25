@@ -34,6 +34,10 @@ class SteeringConfig:
     lean_deadzone_deg: float = 3.5            # Deadzone degrees to ignore natural micro-wobbles
     lean_max_deg: float = 16.0                # Degrees for 100% full steering lock
 
+    # Solo testing steering settings (tight neutral zone centered on solo player)
+    solo_deadzone: float = 0.04               # Tight deadzone half-width for solo player (+/- 4% of screen)
+    solo_margin: float = 0.10                 # Travel margin for solo steering ramp
+
 
 @dataclass
 class GestureConfig:

@@ -448,6 +448,13 @@ class HUD:
         cv2.line(frame, (lx - 6, 40), (lx + 6, 40), (0, 220, 100), 2)
         cv2.line(frame, (rx - 6, 40), (rx + 6, 40), (0, 220, 100), 2)
 
+        # Guidance badges above thresholds
+        is_duo = (p1 is not None and p2 is not None)
+        l_label = "◄ P1 LEFT" if is_duo else "◄ LEFT"
+        r_label = "P2 RIGHT ►" if is_duo else "RIGHT ►"
+        HUD.draw_badge(frame, l_label, (max(5, lx - 45), 36), (0, 200, 100), font_scale=0.30)
+        HUD.draw_badge(frame, r_label, (min(w - 75, rx + 5), 36), (0, 200, 100), font_scale=0.30)
+
         # 2. Draw clean players with corner brackets (unobstructed face & body)
         for is_p1, pose, color in ((True, p1, COLOR_P1), (False, p2, COLOR_P2)):
             if pose is None:
@@ -482,7 +489,8 @@ class HUD:
             line_x2 = min(w - 1, x2 + 10)
             b_col = COLOR_ALERT if is_brake else (70, 70, 180)
             cv2.line(frame, (line_x1, b_px), (line_x2, b_px), b_col, 2 if is_brake else 1, cv2.LINE_AA)
-            badge_txt = "▼ P1 BRAKE" if is_p1 else "▼ P2 BRAKE"
+            is_duo = (p1 is not None and p2 is not None)
+            badge_txt = ("▼ P1 BRAKE" if is_p1 else "▼ P2 BRAKE") if is_duo else "▼ BRAKE / REVERSE"
             HUD.draw_badge(frame, badge_txt, (line_x1, max(15, b_px - 4)), b_col, font_scale=0.32, thickness=1)
 
             role_str = "P1 Driver" if is_p1 else "P2 Co-pilot"
@@ -569,6 +577,12 @@ class HUD:
         p2_nx = gestures.calibration.p2_neutral_x if gestures.calibration else 0.72
         left_thresh = gestures.calibration.left_thresh if gestures.calibration else 0.23
         right_thresh = gestures.calibration.right_thresh if gestures.calibration else 0.77
+
+        # Use active steering thresholds (adapts dynamically for solo vs duo)
+        if gestures.steering and gestures.steering.left_thresh is not None:
+            left_thresh = gestures.steering.left_thresh
+        if gestures.steering and gestures.steering.right_thresh is not None:
+            right_thresh = gestures.steering.right_thresh
 
         if self.debug_mode:
             # Full Detailed Debug View

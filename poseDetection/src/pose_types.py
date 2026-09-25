@@ -318,6 +318,8 @@ class SteeringState:
     active: bool = False
     p1_power: float = 0.0
     p2_power: float = 0.0
+    left_thresh: Optional[float] = None
+    right_thresh: Optional[float] = None
 
 
 @dataclass
