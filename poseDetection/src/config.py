@@ -21,6 +21,11 @@ class SteeringConfig:
     net_deadband: float = 0.01
     full_steer_intensity: float = 0.98
 
+    # Time-based position steering (starts turning on threshold, ramps over time)
+    time_based_position: bool = True
+    time_steer_base_intensity: float = 0.25   # Initial PWM power on crossing threshold
+    time_steer_ramp_seconds: float = 0.70     # Duration of continuous hold to reach 100% full lock
+
 
 @dataclass
 class GestureConfig:
