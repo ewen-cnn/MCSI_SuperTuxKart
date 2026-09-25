@@ -317,6 +317,7 @@ class SteeringState:
 class GestureResult:
     steering: SteeringState
     accelerate: bool = False
+    corner_lift: bool = False
     cruise_control: bool = False
     brake: bool = False
     rescue: bool = False
