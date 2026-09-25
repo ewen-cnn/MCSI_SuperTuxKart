@@ -95,6 +95,56 @@ class SteeringEngine:
             travel = max(1e-4, (1.0 - margin) - limit)
             return min(1.0, max(0.0, (val - limit) / travel))
 
+    def _calc_inclination_powers(
+        self, p1: Optional[PlayerPose], p2: Optional[PlayerPose]
+    ) -> Tuple[float, float]:
+        """
+        Computes Left and Right steering powers from torso spine lean angle.
+        Uses shoulder-to-hip vector.
+        """
+        deadzone = getattr(self.config, "lean_deadzone_deg", 3.5)
+        max_deg = getattr(self.config, "lean_max_deg", 16.0)
+        use_spine = getattr(self.config, "inclination_mode", "spine") == "spine"
+
+        def get_angle(p: PlayerPose) -> float:
+            return p.spine_lean_angle_deg if use_spine else p.shoulder_tilt_angle_deg
+
+        def angle_to_power(ang: float) -> float:
+            if ang <= deadzone:
+                return 0.0
+            span = max(1e-4, max_deg - deadzone)
+            return float(min(1.0, (ang - deadzone) / span))
+
+        p1_left = 0.0
+        p2_right = 0.0
+
+        if p1 is not None and p2 is not None:
+            # Duo mode: P1 controls left (negative angle = lean left), P2 controls right (positive angle = lean right)
+            ang1 = get_angle(p1)
+            ang2 = get_angle(p2)
+            if ang1 < -deadzone:
+                p1_left = angle_to_power(abs(ang1))
+            if ang2 > deadzone:
+                p2_right = angle_to_power(ang2)
+
+        elif p1 is not None:
+            # Solo mode (P1)
+            ang = get_angle(p1)
+            if ang < -deadzone:
+                p1_left = angle_to_power(abs(ang))
+            elif ang > deadzone:
+                p2_right = angle_to_power(ang)
+
+        elif p2 is not None:
+            # Solo mode (P2)
+            ang = get_angle(p2)
+            if ang < -deadzone:
+                p1_left = angle_to_power(abs(ang))
+            elif ang > deadzone:
+                p2_right = angle_to_power(ang)
+
+        return p1_left, p2_right
+
     def calculate(
         self,
         p1: Optional[PlayerPose],
@@ -110,10 +160,11 @@ class SteeringEngine:
 
         p1_left_power = 0.0
         p2_right_power = 0.0
-        margin = self.config.margin
-        use_time_steering = getattr(self.config, "time_based_position", True)
+        strategy = getattr(self.config, "strategy", "position").lower()
 
-        if p1 is not None and p2 is not None:
+        if strategy in ("inclination", "lean", "spine"):
+            p1_left_power, p2_right_power = self._calc_inclination_powers(p1, p2)
+        elif p1 is not None and p2 is not None:
             # Duo mode: P1 controls left, P2 controls right
             if use_time_steering:
                 p1_left_power, self.p1_left_start = self._calc_time_power(
