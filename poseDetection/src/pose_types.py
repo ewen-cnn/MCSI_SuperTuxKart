@@ -225,6 +225,13 @@ class PlayerPose:
         return math.degrees(math.atan2(dy, dx))
 
     @property
+    def estimated_distance_m(self) -> float:
+        """Physical distance estimate in meters based on perspective shoulder span."""
+        if self.shoulder_span <= 1e-4:
+            return 99.0
+        return float(min(99.0, max(0.2, 0.30 / self.shoulder_span)))
+
+    @property
     def foreground_score(self) -> float:
         """Score favoring players in the front (wide shoulders, close Z depth)."""
         return self.shoulder_span - (self.depth_z * 0.2)
