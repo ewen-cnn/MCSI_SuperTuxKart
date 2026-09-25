@@ -78,6 +78,10 @@ class CalibrationConfig:
     default_p2_brake_y: float = 0.50
     default_p1_jump_y: float = 0.30
     default_p2_jump_y: float = 0.30
+    crouch_brake_offset: float = 0.10          # Distance shoulders drop below resting height to trigger brake
+    enable_gesture_calibration: bool = True     # Hands-free distance calibration gesture (salute or crossed arms)
+    gesture_hold_seconds: float = 0.80          # Continuous hold duration required to calibrate
+    cooldown_seconds: float = 2.0               # Refractory period after calibration
 
 
 @dataclass
