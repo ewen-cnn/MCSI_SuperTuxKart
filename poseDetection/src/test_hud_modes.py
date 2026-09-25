@@ -45,11 +45,29 @@ class TestHudModes(unittest.TestCase):
         hud.debug_mode = False
         hud.render(frame, p1, p2, gestures, fps=30.0, steer_margin=0.08)
         self.assertEqual(frame.shape, (360, 640, 3))
+        # Verify non-zero pixels near P1 shoulder center (x ~ 179, y ~ 144)
+        sh_px_y, sh_px_x = int(0.4 * 360), int(0.28 * 640)
+        self.assertTrue(np.any(frame[sh_px_y - 3:sh_px_y + 3, sh_px_x - 3:sh_px_x + 3] > 0),
+                        "Shoulder midpoint dot must be rendered in clean HUD!")
 
         # Render in debug mode
+        frame_dbg = np.zeros((360, 640, 3), dtype=np.uint8)
         hud.debug_mode = True
-        hud.render(frame, p1, p2, gestures, fps=30.0, steer_margin=0.08)
-        self.assertEqual(frame.shape, (360, 640, 3))
+        hud.render(frame_dbg, p1, p2, gestures, fps=30.0, steer_margin=0.08)
+        self.assertEqual(frame_dbg.shape, (360, 640, 3))
+
+    def test_clean_hud_calibrating_progress(self):
+        from pose_types import CalibrationState, CalibrationStatus
+        hud = HUD(debug_mode=False)
+        frame = np.zeros((360, 640, 3), dtype=np.uint8)
+        p1 = make_player(0.28)
+        calib = CalibrationState(status=CalibrationStatus.CALIBRATING, calib_pose_progress=0.60)
+        steering = SteeringState()
+        gestures = GestureResult(steering=steering, calibration=calib)
+
+        hud.render(frame, p1, None, gestures, fps=30.0, steer_margin=0.08)
+        # Center bar should have non-zero pixels
+        self.assertTrue(np.any(frame[160:176, 250:390] > 0), "Calibration progress bar must be rendered!")
 
 
 if __name__ == "__main__":

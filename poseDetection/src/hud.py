@@ -469,6 +469,22 @@ class HUD:
 
             self.draw_corner_brackets(frame, x1, y1, x2, y2, p_color, length=18, thickness=2)
 
+            # Shoulder Midpoint Tracking Dot (for precise vertical throttle/brake control)
+            sx_px = int(pose.shoulder_x * w)
+            sy_px = int(pose.shoulder_y * h)
+            cv2.circle(frame, (sx_px, sy_px), 7, (255, 255, 255), 2, cv2.LINE_AA)
+            cv2.circle(frame, (sx_px, sy_px), 5, p_color, -1, cv2.LINE_AA)
+
+            # Subtle horizontal brake threshold guideline
+            b_y = gestures.p1_brake_y if is_p1 else gestures.p2_brake_y
+            b_px = int(b_y * h)
+            line_x1 = max(0, x1 - 10)
+            line_x2 = min(w - 1, x2 + 10)
+            b_col = COLOR_ALERT if is_brake else (70, 70, 180)
+            cv2.line(frame, (line_x1, b_px), (line_x2, b_px), b_col, 2 if is_brake else 1, cv2.LINE_AA)
+            badge_txt = "▼ P1 BRAKE" if is_p1 else "▼ P2 BRAKE"
+            HUD.draw_badge(frame, badge_txt, (line_x1, max(15, b_px - 4)), b_col, font_scale=0.32, thickness=1)
+
             role_str = "P1 Driver" if is_p1 else "P2 Co-pilot"
             if is_brake:
                 role_str += " [BRAKE]"
@@ -484,7 +500,19 @@ class HUD:
             cv2.rectangle(frame, (pill_x, pill_y - 16), (pill_x + pill_w, pill_y + 4), p_color, 1)
             cv2.putText(frame, role_str, (pill_x + 7, pill_y - 3), cv2.FONT_HERSHEY_SIMPLEX, 0.42, p_color, 1, cv2.LINE_AA)
 
-        # 3. Top Steering Gauge
+        # 3. Distance calibration gesture progress bar
+        if gestures.calibration and getattr(gestures.calibration, "status", None) == CalibrationStatus.CALIBRATING:
+            prog = getattr(gestures.calibration, "calib_pose_progress", 0.0)
+            bar_w = 260
+            bar_h = 16
+            bx1 = (w - bar_w) // 2
+            by1 = h // 2 - 20
+            cv2.rectangle(frame, (bx1, by1), (bx1 + bar_w, by1 + bar_h), (20, 20, 20), -1)
+            cv2.rectangle(frame, (bx1, by1), (bx1 + int(bar_w * prog), by1 + bar_h), (0, 255, 120), -1)
+            cv2.rectangle(frame, (bx1, by1), (bx1 + bar_w, by1 + bar_h), (255, 255, 255), 1)
+            HUD.draw_badge(frame, f"HOLD SALUTE TO CALIBRATE ({int(prog * 100)}%)", (bx1, by1 - 6), (0, 255, 120), font_scale=0.40)
+
+        # 4. Top Steering Gauge
         if gestures.steering.direction:
             net_pct = int(gestures.steering.intensity * 100)
             if gestures.steering.direction == "LEFT":
@@ -497,8 +525,9 @@ class HUD:
         else:
             HUD.draw_badge(frame, "STRAIGHT (0%)", (w // 2 - 60, 30), (180, 180, 180), font_scale=0.48, thickness=1)
 
-        # 4. Command Pill at Top-Left
+        # 5. Command Pill at Top-Left
         steer_cmd = gestures.steering.direction or "STRAIGHT"
+        throt_pct = int(getattr(gestures, "accel_intensity", 0.80) * 100)
         if gestures.brake:
             throt_cmd = "BRAKE"
             cmd_col = COLOR_ALERT
@@ -506,7 +535,10 @@ class HUD:
             throt_cmd = "CORNER LIFT"
             cmd_col = COLOR_WARN
         elif gestures.accelerate:
-            throt_cmd = "ACCEL (100%)"
+            throt_cmd = f"ACCEL ({throt_pct}%)"
+            cmd_col = COLOR_OK
+        elif getattr(gestures, "raw_accelerate", False):
+            throt_cmd = f"ACCEL ({throt_pct}%)*"
             cmd_col = COLOR_OK
         else:
             throt_cmd = "COAST"
