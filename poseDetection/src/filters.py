@@ -49,6 +49,9 @@ class OneEuroFilter:
         return 1.0 / (1.0 + tau / max(dt, 1e-6))
 
     def filter(self, x: float, timestamp: Optional[float] = None) -> float:
+        if math.isnan(x) or math.isinf(x):
+            return self.x_filt.prev if self.x_filt.prev is not None else 0.0
+
         if timestamp is None:
             timestamp = time.time()
 
@@ -60,6 +63,12 @@ class OneEuroFilter:
         self.last_time = timestamp
         if dt <= 1e-6:
             dt = 1e-6
+
+        # Avoid derivative explosion after dropped frames / stall
+        if dt > 0.5:
+            self.dx_filt.reset()
+            self.x_filt.prev = x
+            return x
 
         prev_x = self.x_filt.prev if self.x_filt.prev is not None else x
         dx = (x - prev_x) / dt

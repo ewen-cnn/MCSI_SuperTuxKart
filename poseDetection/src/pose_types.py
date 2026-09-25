@@ -11,11 +11,24 @@ class Point3D:
     z: float = 0.0
     visibility: float = 1.0
 
+    def is_valid(self) -> bool:
+        """Returns False if any coordinate is NaN or infinite."""
+        return not (
+            math.isnan(self.x) or math.isnan(self.y) or math.isnan(self.z)
+            or math.isinf(self.x) or math.isinf(self.y) or math.isinf(self.z)
+        )
+
     def distance_to(self, other: "Point3D") -> float:
+        if not self.is_valid() or not other.is_valid():
+            return 999.0
         return math.hypot(self.x - other.x, self.y - other.y)
 
     @classmethod
     def midpoint(cls, p1: "Point3D", p2: "Point3D") -> "Point3D":
+        if not p1.is_valid():
+            return p2
+        if not p2.is_valid():
+            return p1
         return cls(
             x=(p1.x + p2.x) / 2.0,
             y=(p1.y + p2.y) / 2.0,
@@ -174,6 +187,42 @@ class PlayerPose:
     def depth_z(self) -> float:
         """Mean relative Z depth of upper body. Smaller/negative = closer to camera."""
         return (self.left_shoulder.z + self.right_shoulder.z + self.nose.z) / 3.0
+
+    def is_valid_detection(self) -> bool:
+        """Ensures core landmarks are valid numbers and visible."""
+        return (
+            self.left_shoulder.is_valid()
+            and self.right_shoulder.is_valid()
+            and not (math.isnan(self.shoulder_x) or math.isinf(self.shoulder_x))
+            and not (math.isnan(self.shoulder_y) or math.isinf(self.shoulder_y))
+            and self.shoulder_span > 0.01
+        )
+
+    @property
+    def spine_lean_angle_deg(self) -> float:
+        """
+        Torso lean angle (degrees) computed from hip midpoint to shoulder midpoint vector.
+        Negative = leaning left, Positive = leaning right.
+        Immune to individual shoulder shrugs.
+        """
+        dx = self.shoulder_x - self.hip_x
+        dy = self.hip_y - self.shoulder_y  # In image coords, shoulder_y < hip_y, so dy > 0
+        if dy <= 1e-4:
+            return self.shoulder_tilt_angle_deg
+        angle_rad = math.atan2(dx, dy)
+        return math.degrees(angle_rad)
+
+    @property
+    def shoulder_tilt_angle_deg(self) -> float:
+        """
+        Shoulder line tilt angle (degrees).
+        Negative = tilting left, Positive = tilting right.
+        """
+        dx = self.left_shoulder.x - self.right_shoulder.x
+        dy = self.left_shoulder.y - self.right_shoulder.y
+        if abs(dx) <= 1e-4:
+            return 0.0
+        return math.degrees(math.atan2(dy, dx))
 
     @property
     def foreground_score(self) -> float:

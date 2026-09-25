@@ -74,10 +74,15 @@ class FilterConfig:
 class TrackerConfig:
     num_poses: int = 4
     min_shoulder_span: float = 0.14
-    max_depth_z: float = 0.30
+    max_depth_z: float = 0.40
     min_detection_confidence: float = 0.5
     min_tracking_confidence: float = 0.5
     min_player_size: float = 0.10
+
+    # Multi-layer Depth Bystander Rejection
+    max_relative_depth_diff: float = 0.15     # Relative Z-depth gap behind primary player
+    min_shoulder_scale_ratio: float = 0.55    # Bystander rejection ratio based on shoulder width
+    distance_jump_rejection: float = 0.22     # Distance jump hysteresis threshold
 
 
 @dataclass
