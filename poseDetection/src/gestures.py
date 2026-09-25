@@ -246,22 +246,24 @@ class VerticalActionDetector:
         pose: Optional[Union[PlayerPose, PlayerFace]],
         standing_y: Optional[float],
         is_calibrating: bool = False,
+        brake_y: Optional[float] = None,
+        jump_y: Optional[float] = None,
     ) -> Tuple[bool, bool, float, float]:
         """Calculates (brake_active, jump_active, brake_y, jump_y) for a player."""
         base_y = standing_y if standing_y is not None else self.config.default_standing_y
-        brake_y = getattr(self.config, "default_brake_y", base_y + self.config.crouch_threshold)
-        jump_y = getattr(self.config, "default_jump_y", base_y - self.config.jump_threshold)
+        b_y = brake_y if brake_y is not None else (base_y + self.config.crouch_threshold)
+        j_y = jump_y if jump_y is not None else (base_y - self.config.jump_threshold)
 
         brake = False
         jump = False
         if pose is not None and not is_calibrating:
             pos_y = pose.head_y if hasattr(pose, "head_y") else pose.shoulder_y
-            if pos_y > brake_y:
+            if pos_y > b_y:
                 brake = True
-            elif pos_y < jump_y:
+            elif pos_y < j_y:
                 jump = True
 
-        return brake, jump, brake_y, jump_y
+        return brake, jump, b_y, j_y
 
 
 class DuoGestureDetector:
@@ -379,10 +381,18 @@ class DuoGestureDetector:
         )
 
         p1_brake, p1_jump, p1_brake_y, p1_jump_y = self.vertical_detector.evaluate_player(
-            p1, calib.p1_standing_y, is_calibrating=p1_is_calib
+            p1,
+            calib.p1_standing_y,
+            is_calibrating=p1_is_calib,
+            brake_y=calib.p1_brake_y,
+            jump_y=calib.p1_jump_y,
         )
         p2_brake, p2_jump, p2_brake_y, p2_jump_y = self.vertical_detector.evaluate_player(
-            p2, calib.p2_standing_y, is_calibrating=p2_is_calib
+            p2,
+            calib.p2_standing_y,
+            is_calibrating=p2_is_calib,
+            brake_y=calib.p2_brake_y,
+            jump_y=calib.p2_jump_y,
         )
 
         brake = p1_brake or p2_brake
@@ -430,6 +440,7 @@ class DuoGestureDetector:
             card_bbox=None,
             card_enabled=False,
             rescue_mode=self.rescue_mode,
+            just_calibrated=self.calibrator.just_calibrated,
             p1_face=p1 if isinstance(p1, PlayerFace) else None,
             p2_face=p2 if isinstance(p2, PlayerFace) else None,
         )

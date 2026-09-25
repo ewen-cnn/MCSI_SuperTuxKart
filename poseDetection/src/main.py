@@ -58,6 +58,9 @@ def run_controller(config: Optional[AppConfig] = None):
                 if gestures.steering.active and gestures.steering.direction:
                     actions.add(gestures.steering.direction)
 
+                if getattr(gestures, "just_calibrated", False):
+                    hud.show_message("Brake line calibrated!", duration=2.5, color=(0, 255, 120))
+
                 client.update(actions)
 
                 hud.render(frame, p1, p2, gestures, fps, detector.steer_margin)
@@ -68,7 +71,7 @@ def run_controller(config: Optional[AppConfig] = None):
                     break
                 elif key in (ord("c"), ord("C")):
                     detector.calibrate(p1, p2, timestamp=now)
-                    hud.show_message("Lines snapped to current posture!", duration=2.0, color=(0, 255, 0))
+                    hud.show_message("Brake line calibrated!", duration=2.5, color=(0, 255, 120))
                 elif key in (ord("a"), ord("A")):
                     detector.cruise_control = not detector.cruise_control
                 elif key in (ord("d"), ord("D")):

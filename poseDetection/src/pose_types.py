@@ -344,6 +344,7 @@ class GestureResult:
     card_detected: bool = False
     card_bbox: Optional[Tuple[int, int, int, int]] = None
     card_enabled: bool = True
-    rescue_mode: str = "color"
+    rescue_mode: str = "jump"
+    just_calibrated: bool = False
     p1_face: Optional[PlayerFace] = None
     p2_face: Optional[PlayerFace] = None
