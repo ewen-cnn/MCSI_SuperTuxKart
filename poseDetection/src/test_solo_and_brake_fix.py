@@ -170,6 +170,63 @@ class TestSoloSteeringAndBrake(unittest.TestCase):
         st_no_l = engine.calculate(p1_neutral, p2_left_step, timestamp=3.5)
         self.assertIsNone(st_no_l.direction)
 
+    def test_right_steering_starts_at_base_intensity_not_stuck_at_100(self):
+        """
+        Regression test: Verify that right steering does not get stuck at 100%
+        from stale start timestamps across player switches or repeated leans.
+        """
+        cfg = SteeringConfig(
+            left_threshold=0.40,
+            right_threshold=0.60,
+            time_based_position=True,
+            time_steer_base_intensity=0.28,
+            time_steer_ramp_seconds=0.70,
+            enable_pwm=False,
+        )
+        engine = SteeringEngine(cfg)
+
+        p_center = make_test_pose(shoulder_x=0.50)
+        p_right = make_test_pose(shoulder_x=0.65)
+
+        # 1. First right turn at t=10.0
+        st1 = engine.calculate(p_right, None, timestamp=10.0)
+        self.assertEqual(st1.direction, "RIGHT")
+        self.assertAlmostEqual(st1.intensity, 0.28, places=2)
+
+        # 2. Return to center at t=10.8
+        st_center = engine.calculate(p_center, None, timestamp=10.8)
+        self.assertIsNone(st_center.direction)
+
+        # 3. Second right turn at t=25.0 (15 seconds later)
+        # BUG REGRESSION: In the old code, this was 1.0 (100%) because start_time was stale!
+        # Now, it must restart fresh at 0.28!
+        st2 = engine.calculate(p_right, None, timestamp=25.0)
+        self.assertEqual(st2.direction, "RIGHT")
+        self.assertAlmostEqual(st2.intensity, 0.28, places=2)
+
+    def test_solid_vs_pwm_actuation(self):
+        """
+        Verify that enable_pwm=False gives solid direct keypress (active=True),
+        while enable_pwm=True pulses via PWM.
+        """
+        # Solid direct steering
+        cfg_solid = SteeringConfig(enable_pwm=False, left_threshold=0.40, right_threshold=0.60)
+        engine_solid = SteeringEngine(cfg_solid)
+        p_left = make_test_pose(shoulder_x=0.35)
+        p_right = make_test_pose(shoulder_x=0.65)
+
+        st_l_solid = engine_solid.calculate(p_left, None, timestamp=1.0)
+        self.assertTrue(st_l_solid.active, "Solid steering must hold key active without pulsing!")
+
+        st_r_solid = engine_solid.calculate(p_right, None, timestamp=2.0)
+        self.assertTrue(st_r_solid.active, "Solid steering must hold key active without pulsing!")
+
+        # PWM pulsed steering
+        cfg_pwm = SteeringConfig(enable_pwm=True, left_threshold=0.40, right_threshold=0.60, pwm_period=0.10)
+        engine_pwm = SteeringEngine(cfg_pwm)
+        st_l_pwm = engine_pwm.calculate(p_left, None, timestamp=1.0)
+        self.assertIsNotNone(st_l_pwm.direction)
+
 
 if __name__ == "__main__":
     unittest.main()

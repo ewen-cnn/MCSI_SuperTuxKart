@@ -22,8 +22,8 @@ class SteeringConfig:
     # -------------------------------------------------------------------------
 
     # === MODE 1: SOLO MODE (Small neutral zone for testing alone) ===
-    left_threshold: float = 0.40
-    right_threshold: float = 0.60
+    left_threshold: float = 0.45
+    right_threshold: float = 0.55
 
     # === MODE 2: DUO / COLLABORATIVE MODE (Bigger neutral zone between two players) ===
     # To switch to Duo Mode, uncomment the two lines below and comment the two lines above:
@@ -34,7 +34,11 @@ class SteeringConfig:
     margin: float = 0.08
     p1_center_x: float = 0.28
     p2_center_x: float = 0.72
-    fixed_lines: bool = True
+    # Steering actuation mode:
+    # enable_pwm = False -> Solid 100% keypress (instant bite, clean arcade handling, no pulsing/stutter)
+    # enable_pwm = True  -> PWM pulsed duty-cycle (pulses arrow key to simulate partial steering lock)
+    enable_pwm: bool = False
+
     pwm_period: float = 0.10                  # Fast 10 Hz PWM pulsing for smooth, responsive steering
     net_deadband: float = 0.01
     full_steer_intensity: float = 0.98
