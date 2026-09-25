@@ -2,10 +2,9 @@ import time
 from typing import Optional, Tuple, Union
 import numpy as np
 
-from config import AppConfig, SteeringConfig, GestureConfig, CalibrationConfig, ColorConfig
+from config import AppConfig, SteeringConfig, GestureConfig, CalibrationConfig
 from pose_types import PlayerPose, PlayerFace, SteeringState, GestureResult, CalibrationStatus
 from calibration import CalibrationManager
-from color_detector import ColorCardDetector
 from capture import Camera
 from tracker import PoseTracker
 from hud import HUD
@@ -274,13 +273,11 @@ class DuoGestureDetector:
         steering_config: Optional[SteeringConfig] = None,
         gesture_config: Optional[GestureConfig] = None,
         calibration_config: Optional[CalibrationConfig] = None,
-        color_config: Optional[ColorConfig] = None,
     ):
         base_cfg = config or AppConfig()
         st_cfg = steering_config or base_cfg.steering
         ge_cfg = gesture_config or base_cfg.gestures
         cal_cfg = calibration_config or base_cfg.calibration
-        cl_cfg = color_config or base_cfg.color
 
         self.config = base_cfg
         self.steering_engine = SteeringEngine(config=st_cfg)
@@ -289,41 +286,11 @@ class DuoGestureDetector:
             config=cal_cfg,
             steering_config=st_cfg,
         )
-        self.color_detector = ColorCardDetector(config=cl_cfg)
         self.rescue_mode: str = ge_cfg.rescue_mode
 
         self.cruise_control: bool = False
         self.prev_hands_up: bool = False
         self.turn_start_time: Optional[float] = None
-
-    def toggle_rescue_mode(self) -> str:
-        """Toggles rescue mode between 'color' and 'jump'."""
-        if self.rescue_mode == "color":
-            self.rescue_mode = "jump"
-        else:
-            self.rescue_mode = "color"
-        return self.rescue_mode
-
-    def toggle_card_detection(self) -> bool:
-        """Toggles color card detection on or off."""
-        self.color_detector.config.enabled = not self.color_detector.config.enabled
-        if not self.color_detector.config.enabled and self.rescue_mode == "color":
-            self.rescue_mode = "jump"
-        elif self.color_detector.config.enabled and self.rescue_mode == "jump":
-            self.rescue_mode = "color"
-        return self.color_detector.config.enabled
-
-    def set_card_detection(self, enabled: bool):
-        """Explicitly enables or disables color card detection."""
-        self.color_detector.config.enabled = enabled
-        if not enabled and self.rescue_mode == "color":
-            self.rescue_mode = "jump"
-        elif enabled and self.rescue_mode == "jump":
-            self.rescue_mode = "color"
-
-    def sample_card_color(self, frame: Optional[np.ndarray], box_size: int = 80) -> Tuple[bool, str]:
-        """Samples card color from the center of the frame and updates HSV thresholds."""
-        return self.color_detector.sample_from_frame(frame, box_size=box_size)
 
 
     @property
@@ -418,26 +385,8 @@ class DuoGestureDetector:
             p2, calib.p2_standing_y, is_calibrating=p2_is_calib
         )
 
-        card_triggered = False
-        card_detected = False
-        card_bbox = None
-        card_enabled = bool(getattr(self.color_detector.config, "enabled", True))
-        if frame is not None and card_enabled:
-            card_triggered, card_detected, card_bbox = self.color_detector.detect(
-                frame, timestamp=timestamp
-            )
-
         brake = p1_brake or p2_brake
-        jump_triggered = p1_jump or p2_jump
-
-        if self.rescue_mode == "color" and card_enabled:
-            rescue = card_triggered
-        elif self.rescue_mode == "jump" or not card_enabled:
-            rescue = jump_triggered
-        elif self.rescue_mode == "both":
-            rescue = jump_triggered or card_triggered
-        else:
-            rescue = card_triggered
+        rescue = p1_jump or p2_jump
 
         accelerate = self.cruise_control and not brake
 
@@ -477,9 +426,9 @@ class DuoGestureDetector:
             p1_hip=p1.hip if p1 else None,
             p2_hip=p2.hip if p2 else None,
             calibration=calib,
-            card_detected=card_detected,
-            card_bbox=card_bbox,
-            card_enabled=card_enabled,
+            card_detected=False,
+            card_bbox=None,
+            card_enabled=False,
             rescue_mode=self.rescue_mode,
             p1_face=p1 if isinstance(p1, PlayerFace) else None,
             p2_face=p2 if isinstance(p2, PlayerFace) else None,
