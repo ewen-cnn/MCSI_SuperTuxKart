@@ -45,6 +45,12 @@ class GestureConfig:
     default_jump_y: float = 0.30
     rescue_mode: str = "jump"
 
+    # Max Acceleration Modulation
+    # Caps top cruise speed via PWM duty cycle so the kart doesn't accelerate uncontrollably
+    max_accel_intensity: float = 0.80           # 0.80 = 80% throttle duty cycle (set to 1.0 for uncapped 100% full speed)
+    accel_pwm_period: float = 0.15              # PWM period in seconds for throttle pulsing
+    modulate_accel: bool = True                 # Enables throttle duty-cycle capping
+
     # Cornering Throttle Reduction (relative acceleration: drops throttle while turning)
     cornering_lift_enabled: bool = True
     cornering_lift_steer_threshold: float = 0.45
