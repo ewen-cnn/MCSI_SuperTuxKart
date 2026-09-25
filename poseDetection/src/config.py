@@ -43,13 +43,13 @@ class GestureConfig:
     default_torso_height: float = 0.28
     default_brake_y: float = 0.50
     default_jump_y: float = 0.30
-    rescue_mode: str = "jump"
+    rescue_mode: str = "disabled"
 
     # Max Acceleration Modulation
-    # Caps top cruise speed via PWM duty cycle so the kart doesn't accelerate uncontrollably
-    max_accel_intensity: float = 0.80           # 0.80 = 80% throttle duty cycle (set to 1.0 for uncapped 100% full speed)
+    # Disabled by default on keyboard: pulsing keyboard UP key causes engine jerk/stutter in SuperTuxKart
+    max_accel_intensity: float = 0.80           # 0.80 = 80% throttle duty cycle
     accel_pwm_period: float = 0.15              # PWM period in seconds for throttle pulsing
-    modulate_accel: bool = True                 # Enables throttle duty-cycle capping
+    modulate_accel: bool = False                # False = solid continuous keyboard UP (prevents stutter/dropouts)
 
     # Cornering Throttle Reduction (relative acceleration: drops throttle while turning)
     cornering_lift_enabled: bool = True

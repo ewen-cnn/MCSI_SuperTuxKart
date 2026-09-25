@@ -400,7 +400,7 @@ class DuoGestureDetector:
         )
 
         brake = p1_brake or p2_brake
-        rescue = p1_jump or p2_jump
+        rescue = False  # Deactivated: physical jump threshold caused false-positive spamming; card detector removed
 
         raw_accelerate = self.cruise_control and not brake
 
