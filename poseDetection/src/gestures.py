@@ -60,16 +60,12 @@ class SteeringEngine:
         self.p1_right_start: Optional[float] = None
         self.p2_left_start: Optional[float] = None
         self.p2_right_start: Optional[float] = None
-        self.solo_center_x: Optional[float] = None
-        self.last_seen_time: Optional[float] = None
 
     def reset(self):
         self.p1_left_start = None
         self.p1_right_start = None
         self.p2_left_start = None
         self.p2_right_start = None
-        self.solo_center_x = None
-        self.last_seen_time = None
         self.modulator.reset()
 
     def _calc_time_power(
@@ -148,31 +144,6 @@ class SteeringEngine:
 
         return p1_left, p2_right
 
-    def _get_solo_thresholds(
-        self, pose: Union[PlayerPose, PlayerFace], default_neutral_x: float
-    ) -> Tuple[float, float]:
-        """
-        Computes tight left/right thresholds for a single player.
-        Locks the solo neutral center to where the player was first detected (or 0.50 if centered).
-        Re-anchors automatically if the player moves to a different seat/territory (> 0.25 distance).
-        Total neutral zone width is strictly 2 * solo_deadzone.
-        """
-        sh_x = pose.shoulder_x
-        if self.solo_center_x is None or abs(sh_x - self.solo_center_x) > 0.25:
-            if 0.38 <= sh_x <= 0.62:
-                self.solo_center_x = 0.50
-            elif sh_x < 0.38:
-                self.solo_center_x = default_neutral_x
-            else:
-                self.solo_center_x = default_neutral_x
-            self.p1_left_start = None
-            self.p1_right_start = None
-            self.p2_left_start = None
-            self.p2_right_start = None
-
-        deadzone = getattr(self.config, "solo_deadzone", self.config.deadzone)
-        return self.solo_center_x - deadzone, self.solo_center_x + deadzone
-
     def calculate(
         self,
         p1: Optional[PlayerPose],
@@ -192,71 +163,70 @@ class SteeringEngine:
         use_time_steering = getattr(self.config, "time_based_position", True)
         strategy = getattr(self.config, "strategy", "position").lower()
 
+        # Hardcoded fixed thresholds based on neutral center and deadzone
+        deadzone = self.config.deadzone
+        p1_l = p1_neutral_x - deadzone
+        p1_r = p1_neutral_x + deadzone
+        p2_l = p2_neutral_x - deadzone
+        p2_r = p2_neutral_x + deadzone
+
         eff_left = left_thresh
         eff_right = right_thresh
-
-        if p1 is not None or p2 is not None:
-            self.last_seen_time = timestamp
 
         if strategy in ("inclination", "lean", "spine"):
             p1_left_power, p2_right_power = self._calc_inclination_powers(p1, p2)
             eff_left = left_thresh
             eff_right = right_thresh
         elif p1 is not None and p2 is not None:
-            # Duo mode: P1 controls left, P2 controls right
-            self.solo_center_x = None
-            eff_left = left_thresh
-            eff_right = right_thresh
+            # Duo mode: P1 controls left (< p1_l), P2 controls right (> p2_r)
+            eff_left = p1_l
+            eff_right = p2_r
             if use_time_steering:
                 p1_left_power, self.p1_left_start = self._calc_time_power(
-                    p1.shoulder_x < left_thresh, self.p1_left_start, timestamp
+                    p1.shoulder_x < p1_l, self.p1_left_start, timestamp
                 )
                 p2_right_power, self.p2_right_start = self._calc_time_power(
-                    p2.shoulder_x > right_thresh, self.p2_right_start, timestamp
+                    p2.shoulder_x > p2_r, self.p2_right_start, timestamp
                 )
             else:
-                if p1.shoulder_x < left_thresh:
-                    p1_left_power = self._calc_distance_power(p1.shoulder_x, left_thresh, margin, "LEFT")
-                if p2.shoulder_x > right_thresh:
-                    p2_right_power = self._calc_distance_power(p2.shoulder_x, right_thresh, margin, "RIGHT")
+                if p1.shoulder_x < p1_l:
+                    p1_left_power = self._calc_distance_power(p1.shoulder_x, p1_l, margin, "LEFT")
+                if p2.shoulder_x > p2_r:
+                    p2_right_power = self._calc_distance_power(p2.shoulder_x, p2_r, margin, "RIGHT")
 
         elif p1 is not None:
-            # Solo mode (P1) - tight neutral zone around solo center
-            solo_l, solo_r = self._get_solo_thresholds(p1, p1_neutral_x)
-            eff_left = solo_l
-            eff_right = solo_r
-            solo_margin = getattr(self.config, "solo_margin", margin)
+            # Solo mode P1: Hardcoded P1 neutral box [p1_l, p1_r]
+            eff_left = p1_l
+            eff_right = p1_r
             if use_time_steering:
                 p1_left_power, self.p1_left_start = self._calc_time_power(
-                    p1.shoulder_x < solo_l, self.p1_left_start, timestamp
+                    p1.shoulder_x < p1_l, self.p1_left_start, timestamp
                 )
                 p2_right_power, self.p1_right_start = self._calc_time_power(
-                    p1.shoulder_x > solo_r, self.p1_right_start, timestamp
+                    p1.shoulder_x > p1_r, self.p1_right_start, timestamp
                 )
             else:
-                if p1.shoulder_x < solo_l:
-                    p1_left_power = self._calc_distance_power(p1.shoulder_x, solo_l, solo_margin, "LEFT")
-                elif p1.shoulder_x > solo_r:
-                    p2_right_power = self._calc_distance_power(p1.shoulder_x, solo_r, solo_margin, "RIGHT")
+                if p1.shoulder_x < p1_l:
+                    p1_left_power = self._calc_distance_power(p1.shoulder_x, p1_l, margin, "LEFT")
+                elif p1.shoulder_x > p1_r:
+                    p2_right_power = self._calc_distance_power(p1.shoulder_x, p1_r, margin, "RIGHT")
 
         elif p2 is not None:
-            # Solo mode (P2) - tight neutral zone around solo center
-            solo_l, solo_r = self._get_solo_thresholds(p2, p2_neutral_x)
-            eff_left = solo_l
-            eff_right = solo_r
-            solo_margin = getattr(self.config, "solo_margin", margin)
+            # Solo mode P2: Hardcoded P2 neutral box [p2_l, p2_r]
+            eff_left = p2_l
+            eff_right = p2_r
             if use_time_steering:
                 p1_left_power, self.p2_left_start = self._calc_time_power(
-                    p2.shoulder_x < solo_l, self.p2_left_start, timestamp
+                    p2.shoulder_x < p2_l, self.p2_left_start, timestamp
                 )
                 p2_right_power, self.p2_right_start = self._calc_time_power(
-                    p2.shoulder_x > solo_r, self.p2_right_start, timestamp
+                    p2.shoulder_x > p2_r, self.p2_right_start, timestamp
                 )
             else:
-                if p2.shoulder_x < solo_l:
-                    p1_left_power = self._calc_distance_power(p2.shoulder_x, solo_l, solo_margin, "LEFT")
-                elif p2.shoulder_x > solo_r:
-                    p2_right_power = self._calc_distance_power(p2.shoulder_x, solo_r, solo_margin, "RIGHT")
+                if p2.shoulder_x < p2_l:
+                    p1_left_power = self._calc_distance_power(p2.shoulder_x, p2_l, margin, "LEFT")
+                elif p2.shoulder_x > p2_r:
+                    p2_right_power = self._calc_distance_power(p2.shoulder_x, p2_r, margin, "RIGHT")
 
         else:
             self.reset()

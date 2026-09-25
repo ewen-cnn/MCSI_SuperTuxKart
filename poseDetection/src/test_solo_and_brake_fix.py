@@ -65,112 +65,67 @@ class TestSoloSteeringAndBrake(unittest.TestCase):
         self.assertFalse(res_crouch.accelerate, "Throttle must cut out while braking")
         self.assertTrue(res_crouch.brake, "Brake must be active for SuperTuxKart down key / reverse")
 
-    def test_solo_steering_tight_neutral_centered_at_desk(self):
+    def test_solo_steering_at_p1_position(self):
         """
-        Verify that a solo player in front of camera (x=0.50) has a tight neutral zone
-        [0.46, 0.54] rather than spanning 54% of the screen.
+        Verify hardcoded fixed P1 neutral box [0.23, 0.33] centered at 0.28.
         """
         cfg = SteeringConfig(
             time_based_position=True,
-            solo_deadzone=0.04,
+            deadzone=0.05,
             p1_center_x=0.28,
             p2_center_x=0.72,
         )
         engine = SteeringEngine(cfg)
 
-        # 1. Player centered at 0.50 -> STRAIGHT (inside [0.46, 0.54])
-        p_mid = make_test_pose(shoulder_x=0.50)
-        st_mid = engine.calculate(p_mid, None, left_thresh=0.23, right_thresh=0.77, p1_neutral_x=0.28, p2_neutral_x=0.72, timestamp=1.0)
-        self.assertIsNone(st_mid.direction)
-        self.assertEqual(st_mid.intensity, 0.0)
-        self.assertAlmostEqual(st_mid.left_thresh, 0.46, places=2)
-        self.assertAlmostEqual(st_mid.right_thresh, 0.54, places=2)
+        # Player stands at 0.28 (neutral)
+        p_p1 = make_test_pose(shoulder_x=0.28)
+        st_p1 = engine.calculate(p_p1, None, left_thresh=0.23, right_thresh=0.77, p1_neutral_x=0.28, p2_neutral_x=0.72, timestamp=1.0)
+        self.assertIsNone(st_p1.direction)
+        self.assertAlmostEqual(st_p1.left_thresh, 0.23, places=2)
+        self.assertAlmostEqual(st_p1.right_thresh, 0.33, places=2)
 
-        # 2. Player takes a small step left to 0.44 (< 0.46) -> Turns LEFT immediately
-        p_left = make_test_pose(shoulder_x=0.44)
+        # Stepping left to 0.20 (< 0.23) -> Turns LEFT
+        p_left = make_test_pose(shoulder_x=0.20)
         st_left = engine.calculate(p_left, None, left_thresh=0.23, right_thresh=0.77, p1_neutral_x=0.28, p2_neutral_x=0.72, timestamp=2.0)
         self.assertEqual(st_left.direction, "LEFT")
         self.assertGreater(st_left.intensity, 0.0)
 
-        # 3. Player takes a small step right to 0.56 (> 0.54) -> Turns RIGHT immediately
-        # (Previously, player had to step all the way past 0.77 to turn right!)
-        p_right = make_test_pose(shoulder_x=0.56)
+        # Stepping right to 0.35 (> 0.33) -> Turns RIGHT
+        p_right = make_test_pose(shoulder_x=0.35)
         st_right = engine.calculate(p_right, None, left_thresh=0.23, right_thresh=0.77, p1_neutral_x=0.28, p2_neutral_x=0.72, timestamp=3.0)
         self.assertEqual(st_right.direction, "RIGHT")
         self.assertGreater(st_right.intensity, 0.0)
 
-        # 4. Returning to center (0.50) -> Resets instantly to STRAIGHT
-        st_back = engine.calculate(p_mid, None, left_thresh=0.23, right_thresh=0.77, p1_neutral_x=0.28, p2_neutral_x=0.72, timestamp=4.0)
-        self.assertIsNone(st_back.direction)
-        self.assertEqual(st_back.intensity, 0.0)
-
-    def test_solo_steering_at_p1_position(self):
+    def test_solo_steering_at_p2_position_exact_symmetry(self):
         """
-        Verify that if the solo player stands at the P1 spot (x=0.28),
-        the neutral zone is centered around 0.28 ([0.24, 0.32]).
+        Verify hardcoded fixed P2 neutral box [0.67, 0.77] centered at 0.72 with exact same symmetry.
         """
         cfg = SteeringConfig(
             time_based_position=True,
-            solo_deadzone=0.04,
+            deadzone=0.05,
             p1_center_x=0.28,
             p2_center_x=0.72,
         )
         engine = SteeringEngine(cfg)
 
-        # Player stands at 0.28
-        p_p1 = make_test_pose(shoulder_x=0.28)
-        st_p1 = engine.calculate(p_p1, None, left_thresh=0.23, right_thresh=0.77, p1_neutral_x=0.28, p2_neutral_x=0.72, timestamp=1.0)
-        self.assertIsNone(st_p1.direction)
-        self.assertAlmostEqual(st_p1.left_thresh, 0.24, places=2)
-        self.assertAlmostEqual(st_p1.right_thresh, 0.32, places=2)
-
-        # Stepping left to 0.20 (< 0.24) -> Turns LEFT
-        p_left = make_test_pose(shoulder_x=0.20)
-        st_left = engine.calculate(p_left, None, left_thresh=0.23, right_thresh=0.77, p1_neutral_x=0.28, p2_neutral_x=0.72, timestamp=2.0)
-        self.assertEqual(st_left.direction, "LEFT")
-
-        # Stepping right to 0.35 (> 0.32) -> Turns RIGHT
-        p_right = make_test_pose(shoulder_x=0.35)
-        st_right = engine.calculate(p_right, None, left_thresh=0.23, right_thresh=0.77, p1_neutral_x=0.28, p2_neutral_x=0.72, timestamp=3.0)
-        self.assertEqual(st_right.direction, "RIGHT")
-
-    def test_solo_steering_moves_to_p2_position_maintains_exact_symmetry(self):
-        """
-        Verify that when a player moves over to P2's slot (0.72), the solo center
-        automatically re-anchors to 0.72 with identical deadzone and sensibility.
-        """
-        cfg = SteeringConfig(
-            time_based_position=True,
-            solo_deadzone=0.04,
-            p1_center_x=0.28,
-            p2_center_x=0.72,
-        )
-        engine = SteeringEngine(cfg)
-
-        # 1. Player starts at P1 slot (0.28)
-        p_p1 = make_test_pose(shoulder_x=0.28)
-        st_p1 = engine.calculate(p_p1, None, left_thresh=0.24, right_thresh=0.76, p1_neutral_x=0.28, p2_neutral_x=0.72, timestamp=1.0)
-        self.assertIsNone(st_p1.direction)
-        self.assertAlmostEqual(st_p1.left_thresh, 0.24, places=2)
-        self.assertAlmostEqual(st_p1.right_thresh, 0.32, places=2)
-
-        # 2. Player moves across to P2 slot (0.72)
+        # Player stands at P2 slot 0.72 (neutral)
         p_p2 = make_test_pose(shoulder_x=0.72)
-        st_p2 = engine.calculate(None, p_p2, left_thresh=0.24, right_thresh=0.76, p1_neutral_x=0.28, p2_neutral_x=0.72, timestamp=2.0)
+        st_p2 = engine.calculate(None, p_p2, left_thresh=0.23, right_thresh=0.77, p1_neutral_x=0.28, p2_neutral_x=0.72, timestamp=1.0)
         self.assertIsNone(st_p2.direction, "P2 at neutral position should be STRAIGHT")
-        # P2 thresholds must be centered at 0.72 with exact same +/- 0.04 deadzone: [0.68, 0.76]
-        self.assertAlmostEqual(st_p2.left_thresh, 0.68, places=2)
-        self.assertAlmostEqual(st_p2.right_thresh, 0.76, places=2)
+        self.assertAlmostEqual(st_p2.left_thresh, 0.67, places=2)
+        self.assertAlmostEqual(st_p2.right_thresh, 0.77, places=2)
 
-        # 3. P2 steps left to 0.64 (< 0.68) -> Turns LEFT
+        # P2 steps left to 0.64 (< 0.67) -> Turns LEFT
         p2_left = make_test_pose(shoulder_x=0.64)
-        st2_left = engine.calculate(None, p2_left, left_thresh=0.24, right_thresh=0.76, p1_neutral_x=0.28, p2_neutral_x=0.72, timestamp=3.0)
+        st2_left = engine.calculate(None, p2_left, left_thresh=0.23, right_thresh=0.77, p1_neutral_x=0.28, p2_neutral_x=0.72, timestamp=2.0)
         self.assertEqual(st2_left.direction, "LEFT")
+        self.assertGreater(st2_left.intensity, 0.0)
 
-        # 4. P2 steps right to 0.80 (> 0.76) -> Turns RIGHT
+        # P2 steps right to 0.80 (> 0.77) -> Turns RIGHT
         p2_right = make_test_pose(shoulder_x=0.80)
-        st2_right = engine.calculate(None, p2_right, left_thresh=0.24, right_thresh=0.76, p1_neutral_x=0.28, p2_neutral_x=0.72, timestamp=4.0)
+        st2_right = engine.calculate(None, p2_right, left_thresh=0.23, right_thresh=0.77, p1_neutral_x=0.28, p2_neutral_x=0.72, timestamp=3.0)
         self.assertEqual(st2_right.direction, "RIGHT")
+        self.assertGreater(st2_right.intensity, 0.0)
 
 
 if __name__ == "__main__":
