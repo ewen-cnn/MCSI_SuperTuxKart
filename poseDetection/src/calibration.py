@@ -26,6 +26,9 @@ class CalibrationManager:
         self.cooldown_seconds: float = getattr(config, "cooldown_seconds", 2.0)
         self.hold_seconds: float = getattr(config, "gesture_hold_seconds", 0.80)
 
+        left_th = getattr(self.steering_config, "left_threshold", p1_nx - deadzone)
+        right_th = getattr(self.steering_config, "right_threshold", p2_nx + deadzone)
+
         self.state = CalibrationState(
             p1_neutral_x=p1_nx,
             p2_neutral_x=p2_nx,
@@ -33,8 +36,8 @@ class CalibrationManager:
             p2_standing_y=self.config.default_p2_standing_y,
             calib_pose_counter=0,
             calib_pose_progress=0.0,
-            left_thresh=p1_nx - deadzone,
-            right_thresh=p2_nx + deadzone,
+            left_thresh=left_th,
+            right_thresh=right_th,
             status=CalibrationStatus.CALIBRATED,
             cooldown_remaining=0.0,
             fixed_mode=True,

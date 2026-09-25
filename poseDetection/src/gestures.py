@@ -148,10 +148,10 @@ class SteeringEngine:
         self,
         p1: Optional[PlayerPose],
         p2: Optional[PlayerPose],
-        left_thresh: float,
-        right_thresh: float,
-        p1_neutral_x: float,
-        p2_neutral_x: float,
+        left_thresh: Optional[float] = None,
+        right_thresh: Optional[float] = None,
+        p1_neutral_x: float = 0.28,
+        p2_neutral_x: float = 0.72,
         timestamp: Optional[float] = None,
     ) -> SteeringState:
         if timestamp is None:
@@ -163,70 +163,63 @@ class SteeringEngine:
         use_time_steering = getattr(self.config, "time_based_position", True)
         strategy = getattr(self.config, "strategy", "position").lower()
 
-        # Hardcoded fixed thresholds based on neutral center and deadzone
-        deadzone = self.config.deadzone
-        p1_l = p1_neutral_x - deadzone
-        p1_r = p1_neutral_x + deadzone
-        p2_l = p2_neutral_x - deadzone
-        p2_r = p2_neutral_x + deadzone
-
-        eff_left = left_thresh
-        eff_right = right_thresh
+        # Hardcoded threshold lines defining the central neutral zone [eff_left, eff_right]
+        eff_left = left_thresh if left_thresh is not None else getattr(self.config, "left_threshold", 0.40)
+        eff_right = right_thresh if right_thresh is not None else getattr(self.config, "right_threshold", 0.60)
 
         if strategy in ("inclination", "lean", "spine"):
             p1_left_power, p2_right_power = self._calc_inclination_powers(p1, p2)
-            eff_left = left_thresh
-            eff_right = right_thresh
         elif p1 is not None and p2 is not None:
-            # Duo mode: P1 controls left (< p1_l), P2 controls right (> p2_r)
-            eff_left = p1_l
-            eff_right = p2_r
+            # Duo / Collaborative mode:
+            # P1 can only activate the LEFT threshold line (< eff_left).
+            # P2 can only activate the RIGHT threshold line (> eff_right).
+            # Between eff_left and eff_right is the neutral zone.
             if use_time_steering:
                 p1_left_power, self.p1_left_start = self._calc_time_power(
-                    p1.shoulder_x < p1_l, self.p1_left_start, timestamp
+                    p1.shoulder_x < eff_left, self.p1_left_start, timestamp
                 )
                 p2_right_power, self.p2_right_start = self._calc_time_power(
-                    p2.shoulder_x > p2_r, self.p2_right_start, timestamp
+                    p2.shoulder_x > eff_right, self.p2_right_start, timestamp
                 )
             else:
-                if p1.shoulder_x < p1_l:
-                    p1_left_power = self._calc_distance_power(p1.shoulder_x, p1_l, margin, "LEFT")
-                if p2.shoulder_x > p2_r:
-                    p2_right_power = self._calc_distance_power(p2.shoulder_x, p2_r, margin, "RIGHT")
+                if p1.shoulder_x < eff_left:
+                    p1_left_power = self._calc_distance_power(p1.shoulder_x, eff_left, margin, "LEFT")
+                if p2.shoulder_x > eff_right:
+                    p2_right_power = self._calc_distance_power(p2.shoulder_x, eff_right, margin, "RIGHT")
 
         elif p1 is not None:
-            # Solo mode P1: Hardcoded P1 neutral box [p1_l, p1_r]
-            eff_left = p1_l
-            eff_right = p1_r
+            # Solo mode (player tracked as P1):
+            # Single player tests steering by crossing left_thresh (< eff_left) or right_thresh (> eff_right).
+            # Between eff_left and eff_right is the neutral zone.
             if use_time_steering:
                 p1_left_power, self.p1_left_start = self._calc_time_power(
-                    p1.shoulder_x < p1_l, self.p1_left_start, timestamp
+                    p1.shoulder_x < eff_left, self.p1_left_start, timestamp
                 )
                 p2_right_power, self.p1_right_start = self._calc_time_power(
-                    p1.shoulder_x > p1_r, self.p1_right_start, timestamp
+                    p1.shoulder_x > eff_right, self.p1_right_start, timestamp
                 )
             else:
-                if p1.shoulder_x < p1_l:
-                    p1_left_power = self._calc_distance_power(p1.shoulder_x, p1_l, margin, "LEFT")
-                elif p1.shoulder_x > p1_r:
-                    p2_right_power = self._calc_distance_power(p1.shoulder_x, p1_r, margin, "RIGHT")
+                if p1.shoulder_x < eff_left:
+                    p1_left_power = self._calc_distance_power(p1.shoulder_x, eff_left, margin, "LEFT")
+                elif p1.shoulder_x > eff_right:
+                    p2_right_power = self._calc_distance_power(p1.shoulder_x, eff_right, margin, "RIGHT")
 
         elif p2 is not None:
-            # Solo mode P2: Hardcoded P2 neutral box [p2_l, p2_r]
-            eff_left = p2_l
-            eff_right = p2_r
+            # Solo mode (player tracked as P2):
+            # Single player tests steering by crossing left_thresh (< eff_left) or right_thresh (> eff_right).
+            # Between eff_left and eff_right is the neutral zone.
             if use_time_steering:
                 p1_left_power, self.p2_left_start = self._calc_time_power(
-                    p2.shoulder_x < p2_l, self.p2_left_start, timestamp
+                    p2.shoulder_x < eff_left, self.p2_left_start, timestamp
                 )
                 p2_right_power, self.p2_right_start = self._calc_time_power(
-                    p2.shoulder_x > p2_r, self.p2_right_start, timestamp
+                    p2.shoulder_x > eff_right, self.p2_right_start, timestamp
                 )
             else:
-                if p2.shoulder_x < p2_l:
-                    p1_left_power = self._calc_distance_power(p2.shoulder_x, p2_l, margin, "LEFT")
-                elif p2.shoulder_x > p2_r:
-                    p2_right_power = self._calc_distance_power(p2.shoulder_x, p2_r, margin, "RIGHT")
+                if p2.shoulder_x < eff_left:
+                    p1_left_power = self._calc_distance_power(p2.shoulder_x, eff_left, margin, "LEFT")
+                elif p2.shoulder_x > eff_right:
+                    p2_right_power = self._calc_distance_power(p2.shoulder_x, eff_right, margin, "RIGHT")
 
         else:
             self.reset()
