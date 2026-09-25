@@ -134,6 +134,44 @@ class TestSoloSteeringAndBrake(unittest.TestCase):
         st_right = engine.calculate(p_right, None, left_thresh=0.23, right_thresh=0.77, p1_neutral_x=0.28, p2_neutral_x=0.72, timestamp=3.0)
         self.assertEqual(st_right.direction, "RIGHT")
 
+    def test_solo_steering_moves_to_p2_position_maintains_exact_symmetry(self):
+        """
+        Verify that when a player moves over to P2's slot (0.72), the solo center
+        automatically re-anchors to 0.72 with identical deadzone and sensibility.
+        """
+        cfg = SteeringConfig(
+            time_based_position=True,
+            solo_deadzone=0.04,
+            p1_center_x=0.28,
+            p2_center_x=0.72,
+        )
+        engine = SteeringEngine(cfg)
+
+        # 1. Player starts at P1 slot (0.28)
+        p_p1 = make_test_pose(shoulder_x=0.28)
+        st_p1 = engine.calculate(p_p1, None, left_thresh=0.24, right_thresh=0.76, p1_neutral_x=0.28, p2_neutral_x=0.72, timestamp=1.0)
+        self.assertIsNone(st_p1.direction)
+        self.assertAlmostEqual(st_p1.left_thresh, 0.24, places=2)
+        self.assertAlmostEqual(st_p1.right_thresh, 0.32, places=2)
+
+        # 2. Player moves across to P2 slot (0.72)
+        p_p2 = make_test_pose(shoulder_x=0.72)
+        st_p2 = engine.calculate(None, p_p2, left_thresh=0.24, right_thresh=0.76, p1_neutral_x=0.28, p2_neutral_x=0.72, timestamp=2.0)
+        self.assertIsNone(st_p2.direction, "P2 at neutral position should be STRAIGHT")
+        # P2 thresholds must be centered at 0.72 with exact same +/- 0.04 deadzone: [0.68, 0.76]
+        self.assertAlmostEqual(st_p2.left_thresh, 0.68, places=2)
+        self.assertAlmostEqual(st_p2.right_thresh, 0.76, places=2)
+
+        # 3. P2 steps left to 0.64 (< 0.68) -> Turns LEFT
+        p2_left = make_test_pose(shoulder_x=0.64)
+        st2_left = engine.calculate(None, p2_left, left_thresh=0.24, right_thresh=0.76, p1_neutral_x=0.28, p2_neutral_x=0.72, timestamp=3.0)
+        self.assertEqual(st2_left.direction, "LEFT")
+
+        # 4. P2 steps right to 0.80 (> 0.76) -> Turns RIGHT
+        p2_right = make_test_pose(shoulder_x=0.80)
+        st2_right = engine.calculate(None, p2_right, left_thresh=0.24, right_thresh=0.76, p1_neutral_x=0.28, p2_neutral_x=0.72, timestamp=4.0)
+        self.assertEqual(st2_right.direction, "RIGHT")
+
 
 if __name__ == "__main__":
     unittest.main()
