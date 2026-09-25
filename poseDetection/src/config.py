@@ -43,7 +43,7 @@ class GestureConfig:
     default_torso_height: float = 0.28
     default_brake_y: float = 0.50
     default_jump_y: float = 0.30
-    rescue_mode: str = "color"
+    rescue_mode: str = "jump"
 
     # Cornering Throttle Reduction (relative acceleration: drops throttle while turning)
     cornering_lift_enabled: bool = True

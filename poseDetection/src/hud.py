@@ -302,22 +302,8 @@ class HUD:
         )
 
         # Rescue badge
-        if gestures.rescue_mode == "color":
-            if gestures.rescue:
-                rescue_label = "RESCUE [CARD]: ACTIVE"
-                rescue_col = COLOR_WARN
-            elif gestures.card_detected:
-                rescue_label = "RESCUE [CARD]: DETECTED"
-                rescue_col = COLOR_OK
-            else:
-                rescue_label = "RESCUE [CARD]: IDLE"
-                rescue_col = COLOR_DIM
-        elif gestures.rescue_mode == "jump":
-            rescue_label = "RESCUE [JUMP]: ACTIVE" if gestures.rescue else "RESCUE [JUMP]: IDLE"
-            rescue_col = COLOR_WARN if gestures.rescue else COLOR_DIM
-        else:
-            rescue_label = "RESCUE: ACTIVE" if gestures.rescue else "RESCUE [BOTH]: IDLE"
-            rescue_col = COLOR_WARN if gestures.rescue else COLOR_DIM
+        rescue_label = "RESCUE [JUMP]: ACTIVE" if gestures.rescue else "RESCUE [JUMP]: IDLE"
+        rescue_col = COLOR_WARN if gestures.rescue else COLOR_DIM
 
         HUD.draw_badge(
             frame,
@@ -590,13 +576,6 @@ class HUD:
             # Clean Arcade View (Unobstructed face & body, clear camera feed)
             self.draw_clean_view(frame, p1, p2, gestures, left_thresh, right_thresh)
 
-        # Card detection overlays (completely hidden when card detection is disabled)
-        if getattr(gestures, "card_enabled", True):
-            if self.show_reticle and gestures.rescue_mode == "color" and not gestures.card_detected:
-                self.draw_sample_reticle(frame)
-
-            if gestures.card_detected and gestures.card_bbox:
-                self.draw_card(frame, gestures.card_bbox, triggered=gestures.rescue)
 
         import time
         if self.banner_message and time.time() < self.banner_expires:

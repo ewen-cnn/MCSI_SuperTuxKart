@@ -15,11 +15,8 @@ def run_controller(config: Optional[AppConfig] = None):
 
     print("Starting SuperTuxKart Vision Controller (Z-Depth Filtered Pose)...")
     print("Controls:")
-    print("  'c' / 'C' : Snap/recenter neutral lines to current posture")
+    print("  'c' / 'C' : Calibrate brake line to current shoulder height")
     print("  'a' / 'A' : Toggle cruise control (acceleration) [or raise hand]")
-    print("  'r' / 'R' : Toggle rescue mode (color card vs physical jump)")
-    print("  'x' / 'X' : Toggle card detection & card boxes on/off")
-    print("  's' / 'S' : Calibrate/sample card color in center box")
     print("  'd' / 'D' : Toggle clean arcade HUD vs debug telemetry view")
     print("  'q' / ESC : Exit application\n")
 
@@ -30,7 +27,7 @@ def run_controller(config: Optional[AppConfig] = None):
 
         tracker = PoseTracker(config=cfg.tracker, filter_config=cfg.filter)
         detector = DuoGestureDetector(config=cfg)
-        hud = HUD(show_reticle=getattr(cfg.color, "show_reticle", False))
+        hud = HUD()
 
         prev_time = time.time()
         fps = 0.0
@@ -74,26 +71,6 @@ def run_controller(config: Optional[AppConfig] = None):
                     hud.show_message("Lines snapped to current posture!", duration=2.0, color=(0, 255, 0))
                 elif key in (ord("a"), ord("A")):
                     detector.cruise_control = not detector.cruise_control
-                elif key in (ord("r"), ord("R")):
-                    new_mode = detector.toggle_rescue_mode()
-                    print(f"Rescue mode toggled to: {new_mode.upper()}")
-                elif key in (ord("x"), ord("X")):
-                    card_on = detector.toggle_card_detection()
-                    status_text = "ENABLED" if card_on else "DISABLED (HIDDEN)"
-                    print(f"[Card Detection] {status_text}")
-                    hud.show_message(
-                        f"Card Detection: {status_text}",
-                        duration=2.5,
-                        color=(0, 255, 0) if card_on else (0, 165, 255),
-                    )
-                elif key in (ord("s"), ord("S")):
-                    success, msg = detector.sample_card_color(frame)
-                    print(f"[Color Calibration] {msg}")
-                    hud.show_message(
-                        msg,
-                        duration=3.0,
-                        color=(0, 255, 0) if success else (0, 0, 255),
-                    )
                 elif key in (ord("d"), ord("D")):
                     is_dbg = hud.toggle_debug()
                     status = "DEBUG TELEMETRY" if is_dbg else "CLEAN VIEW"
