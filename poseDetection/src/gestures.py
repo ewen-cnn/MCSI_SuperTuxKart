@@ -154,16 +154,21 @@ class SteeringEngine:
         """
         Computes tight left/right thresholds for a single player.
         Locks the solo neutral center to where the player was first detected (or 0.50 if centered).
-        Total neutral zone width is strictly 2 * solo_deadzone (e.g. 0.08 wide instead of 0.54).
+        Re-anchors automatically if the player moves to a different seat/territory (> 0.25 distance).
+        Total neutral zone width is strictly 2 * solo_deadzone.
         """
         sh_x = pose.shoulder_x
-        if self.solo_center_x is None:
+        if self.solo_center_x is None or abs(sh_x - self.solo_center_x) > 0.25:
             if 0.38 <= sh_x <= 0.62:
                 self.solo_center_x = 0.50
             elif sh_x < 0.38:
                 self.solo_center_x = default_neutral_x
             else:
                 self.solo_center_x = default_neutral_x
+            self.p1_left_start = None
+            self.p1_right_start = None
+            self.p2_left_start = None
+            self.p2_right_start = None
 
         deadzone = getattr(self.config, "solo_deadzone", self.config.deadzone)
         return self.solo_center_x - deadzone, self.solo_center_x + deadzone
