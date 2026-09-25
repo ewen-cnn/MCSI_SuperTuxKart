@@ -21,10 +21,18 @@ class SteeringConfig:
     net_deadband: float = 0.01
     full_steer_intensity: float = 0.98
 
+    # Steering strategy: 'position' (time-based threshold) or 'inclination' (torso tilt)
+    strategy: str = "position"
+
     # Time-based position steering (starts turning on threshold, ramps over time)
     time_based_position: bool = True
     time_steer_base_intensity: float = 0.25   # Initial PWM power on crossing threshold
     time_steer_ramp_seconds: float = 0.70     # Duration of continuous hold to reach 100% full lock
+
+    # Inclination steering settings (spine torso tilt from hip midpoint to shoulder midpoint)
+    inclination_mode: str = "spine"           # 'spine' (hip to shoulder vector) or 'shoulders' (shoulder line tilt)
+    lean_deadzone_deg: float = 3.5            # Deadzone degrees to ignore natural micro-wobbles
+    lean_max_deg: float = 16.0                # Degrees for 100% full steering lock
 
 
 @dataclass

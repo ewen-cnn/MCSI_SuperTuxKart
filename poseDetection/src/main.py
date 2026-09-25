@@ -99,7 +99,21 @@ def run_controller(config: Optional[AppConfig] = None):
 
 
 def main():
-    run_controller()
+    import argparse
+    parser = argparse.ArgumentParser(description="MCSI SuperTuxKart Vision Controller")
+    parser.add_argument(
+        "--steering",
+        choices=["position", "inclination"],
+        default=None,
+        help="Steering strategy: 'position' (time-based threshold) or 'inclination' (spine torso tilt)",
+    )
+    args = parser.parse_args()
+
+    cfg = AppConfig()
+    if args.steering:
+        cfg.steering.strategy = args.steering
+
+    run_controller(config=cfg)
 
 
 if __name__ == "__main__":
