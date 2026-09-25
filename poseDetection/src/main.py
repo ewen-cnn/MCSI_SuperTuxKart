@@ -20,6 +20,7 @@ def run_controller(config: Optional[AppConfig] = None):
     print("  'r' / 'R' : Toggle rescue mode (color card vs physical jump)")
     print("  'x' / 'X' : Toggle card detection & card boxes on/off")
     print("  's' / 'S' : Calibrate/sample card color in center box")
+    print("  'd' / 'D' : Toggle clean arcade HUD vs debug telemetry view")
     print("  'q' / ESC : Exit application\n")
 
     with Camera(cfg.camera) as cam, STKClient(cfg.network) as client:
@@ -92,6 +93,15 @@ def run_controller(config: Optional[AppConfig] = None):
                         msg,
                         duration=3.0,
                         color=(0, 255, 0) if success else (0, 0, 255),
+                    )
+                elif key in (ord("d"), ord("D")):
+                    is_dbg = hud.toggle_debug()
+                    status = "DEBUG TELEMETRY" if is_dbg else "CLEAN VIEW"
+                    print(f"[HUD] Presentation mode: {status}")
+                    hud.show_message(
+                        f"HUD: {status}",
+                        duration=1.8,
+                        color=(0, 255, 255) if is_dbg else (0, 255, 120),
                     )
 
         finally:

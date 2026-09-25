@@ -24,11 +24,17 @@ COLOR_JUMP_ACTIVE = (0, 255, 255)
 class HUD:
     """Renders overlays, player skeletons, dynamic thresholds, and telemetry badges."""
 
-    def __init__(self, show_reticle: bool = False):
+    def __init__(self, show_reticle: bool = False, debug_mode: bool = False):
         self.banner_message: Optional[str] = None
         self.banner_expires: float = 0.0
         self.banner_color: Tuple[int, int, int] = COLOR_OK
         self.show_reticle: bool = show_reticle
+        self.debug_mode: bool = debug_mode
+
+    def toggle_debug(self) -> bool:
+        """Toggles between clean arcade view and detailed debug telemetry."""
+        self.debug_mode = not self.debug_mode
+        return self.debug_mode
 
     def toggle_reticle(self) -> bool:
         self.show_reticle = not self.show_reticle
@@ -410,6 +416,128 @@ class HUD:
             thickness=1,
         )
 
+    @staticmethod
+    def draw_corner_brackets(
+        frame, x1: int, y1: int, x2: int, y2: int, color: Tuple[int, int, int], length: int = 18, thickness: int = 2
+    ):
+        """Draws sleek sci-fi corner brackets around player bounds without occluding the face."""
+        h, w = frame.shape[:2]
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(w - 1, x2), min(h - 1, y2)
+        bw = x2 - x1
+        bh = y2 - y1
+        if bw <= 0 or bh <= 0:
+            return
+        c_len = max(6, min(length, bw // 3, bh // 3))
+
+        # Top-Left
+        cv2.line(frame, (x1, y1), (x1 + c_len, y1), color, thickness)
+        cv2.line(frame, (x1, y1), (x1, y1 + c_len), color, thickness)
+        # Top-Right
+        cv2.line(frame, (x2, y1), (x2 - c_len, y1), color, thickness)
+        cv2.line(frame, (x2, y1), (x2, y1 + c_len), color, thickness)
+        # Bottom-Left
+        cv2.line(frame, (x1, y2), (x1 + c_len, y2), color, thickness)
+        cv2.line(frame, (x1, y2), (x1, y2 - c_len), color, thickness)
+        # Bottom-Right
+        cv2.line(frame, (x2, y2), (x2 - c_len, y2), color, thickness)
+        cv2.line(frame, (x2, y2), (x2, y2 - c_len), color, thickness)
+
+    def draw_clean_view(
+        self,
+        frame,
+        p1: Optional[PlayerPose],
+        p2: Optional[PlayerPose],
+        gestures: GestureResult,
+        left_thresh: float,
+        right_thresh: float,
+    ):
+        h, w, _ = frame.shape
+
+        # 1. Subtle, sleek 1px vertical guidelines for steering thresholds (no heavy tints)
+        lx = int(left_thresh * w)
+        rx = int(right_thresh * w)
+        cv2.line(frame, (lx, 40), (lx, h - 35), (0, 180, 80), 1, cv2.LINE_AA)
+        cv2.line(frame, (rx, 40), (rx, h - 35), (0, 180, 80), 1, cv2.LINE_AA)
+        cv2.line(frame, (lx - 6, 40), (lx + 6, 40), (0, 220, 100), 2)
+        cv2.line(frame, (rx - 6, 40), (rx + 6, 40), (0, 220, 100), 2)
+
+        # 2. Draw clean players with corner brackets (unobstructed face & body)
+        for is_p1, pose, color in ((True, p1, COLOR_P1), (False, p2, COLOR_P2)):
+            if pose is None:
+                continue
+
+            span = max(0.12, pose.shoulder_span)
+            hx = pose.shoulder_x
+            hy = pose.torso_y
+            x1 = int(max(0.0, hx - span * 0.70) * w)
+            x2 = int(min(1.0, hx + span * 0.70) * w)
+            top_y = min(pose.nose.y, pose.shoulder_y)
+            y1 = int(max(0.0, top_y - 0.10) * h)
+            y2 = int(min(1.0, pose.hip_y + 0.10) * h)
+
+            p_color = color
+            is_brake = gestures.p1_brake if is_p1 else gestures.p2_brake
+            if is_brake:
+                p_color = COLOR_ALERT
+
+            self.draw_corner_brackets(frame, x1, y1, x2, y2, p_color, length=18, thickness=2)
+
+            role_str = "P1 Driver" if is_p1 else "P2 Co-pilot"
+            if is_brake:
+                role_str += " [BRAKE]"
+            elif gestures.steering.direction == "LEFT" and is_p1:
+                role_str += " [LEFT]"
+            elif gestures.steering.direction == "RIGHT" and not is_p1:
+                role_str += " [RIGHT]"
+
+            pill_w = len(role_str) * 8 + 14
+            pill_x = max(10, min(w - pill_w - 10, int(hx * w) - pill_w // 2))
+            pill_y = max(24, y1 - 8)
+            cv2.rectangle(frame, (pill_x, pill_y - 16), (pill_x + pill_w, pill_y + 4), (18, 18, 18), -1)
+            cv2.rectangle(frame, (pill_x, pill_y - 16), (pill_x + pill_w, pill_y + 4), p_color, 1)
+            cv2.putText(frame, role_str, (pill_x + 7, pill_y - 3), cv2.FONT_HERSHEY_SIMPLEX, 0.42, p_color, 1, cv2.LINE_AA)
+
+        # 3. Top Steering Gauge
+        if gestures.steering.direction:
+            net_pct = int(gestures.steering.intensity * 100)
+            if gestures.steering.direction == "LEFT":
+                net_label = f"◄◄ STEER LEFT {net_pct}%"
+                s_color = COLOR_P1
+            else:
+                net_label = f"STEER RIGHT {net_pct}% ►►"
+                s_color = COLOR_P2
+            HUD.draw_badge(frame, net_label, (w // 2 - 95, 30), s_color, font_scale=0.55, thickness=2)
+        else:
+            HUD.draw_badge(frame, "STRAIGHT (0%)", (w // 2 - 60, 30), (180, 180, 180), font_scale=0.48, thickness=1)
+
+        # 4. Command Pill at Top-Left
+        steer_cmd = gestures.steering.direction or "STRAIGHT"
+        if gestures.brake:
+            throt_cmd = "BRAKE"
+            cmd_col = COLOR_ALERT
+        elif getattr(gestures, "corner_lift", False):
+            throt_cmd = "CORNER LIFT"
+            cmd_col = COLOR_WARN
+        elif gestures.accelerate:
+            throt_cmd = "ACCEL (100%)"
+            cmd_col = COLOR_OK
+        else:
+            throt_cmd = "COAST"
+            cmd_col = (180, 180, 180)
+
+        cmd_text = f"CMD: {steer_cmd} | {throt_cmd}"
+        if gestures.rescue:
+            cmd_text += " | RESCUE!"
+        HUD.draw_badge(frame, cmd_text, (20, 30), cmd_col, font_scale=0.46, thickness=1)
+
+        # 5. Sleek Bottom Status Bar
+        cv2.rectangle(frame, (0, h - 26), (w, h), (18, 18, 18), -1)
+        cv2.line(frame, (0, h - 26), (w, h - 26), (45, 45, 45), 1)
+        help_text = "[C] Calib | [D] HUD Mode | [A] Accel | [R] Rescue | [Q] Quit"
+        cv2.putText(frame, help_text, (10, h - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (200, 200, 200), 1, cv2.LINE_AA)
+        cv2.putText(frame, "[CLEAN HUD]", (w - 110, h - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (0, 255, 120), 1, cv2.LINE_AA)
+
     def render(
         self,
         frame,
@@ -419,44 +547,48 @@ class HUD:
         fps: float,
         steer_margin: float,
     ):
-        self.draw_skeleton(frame, p1, COLOR_P1, "P1")
-        self.draw_skeleton(frame, p2, COLOR_P2, "P2")
-
         p1_nx = gestures.calibration.p1_neutral_x if gestures.calibration else 0.28
         p2_nx = gestures.calibration.p2_neutral_x if gestures.calibration else 0.72
         left_thresh = gestures.calibration.left_thresh if gestures.calibration else 0.23
         right_thresh = gestures.calibration.right_thresh if gestures.calibration else 0.77
-        self.draw_zones(
-            frame,
-            left_thresh=left_thresh,
-            right_thresh=right_thresh,
-            steer_margin=steer_margin,
-            p1_neutral_x=p1_nx,
-            p2_neutral_x=p2_nx,
-        )
 
-        show_jump_line = gestures.rescue_mode != "color"
-
-        self.draw_player_thresholds(
-            frame=frame,
-            shoulder=gestures.p1_shoulder,
-            brake_active=gestures.p1_brake,
-            brake_y=gestures.p1_brake_y,
-            jump_active=gestures.p1_jump,
-            jump_y=gestures.p1_jump_y,
-            is_p1=True,
-            show_jump_line=show_jump_line,
-        )
-        self.draw_player_thresholds(
-            frame=frame,
-            shoulder=gestures.p2_shoulder,
-            brake_active=gestures.p2_brake,
-            brake_y=gestures.p2_brake_y,
-            jump_active=gestures.p2_jump,
-            jump_y=gestures.p2_jump_y,
-            is_p1=False,
-            show_jump_line=show_jump_line,
-        )
+        if self.debug_mode:
+            # Full Detailed Debug View
+            self.draw_skeleton(frame, p1, COLOR_P1, "P1")
+            self.draw_skeleton(frame, p2, COLOR_P2, "P2")
+            self.draw_zones(
+                frame,
+                left_thresh=left_thresh,
+                right_thresh=right_thresh,
+                steer_margin=steer_margin,
+                p1_neutral_x=p1_nx,
+                p2_neutral_x=p2_nx,
+            )
+            show_jump_line = gestures.rescue_mode != "color"
+            self.draw_player_thresholds(
+                frame=frame,
+                shoulder=gestures.p1_shoulder,
+                brake_active=gestures.p1_brake,
+                brake_y=gestures.p1_brake_y,
+                jump_active=gestures.p1_jump,
+                jump_y=gestures.p1_jump_y,
+                is_p1=True,
+                show_jump_line=show_jump_line,
+            )
+            self.draw_player_thresholds(
+                frame=frame,
+                shoulder=gestures.p2_shoulder,
+                brake_active=gestures.p2_brake,
+                brake_y=gestures.p2_brake_y,
+                jump_active=gestures.p2_jump,
+                jump_y=gestures.p2_jump_y,
+                is_p1=False,
+                show_jump_line=show_jump_line,
+            )
+            self.draw_telemetry(frame, gestures, fps)
+        else:
+            # Clean Arcade View (Unobstructed face & body, clear camera feed)
+            self.draw_clean_view(frame, p1, p2, gestures, left_thresh, right_thresh)
 
         # Card detection overlays (completely hidden when card detection is disabled)
         if getattr(gestures, "card_enabled", True):
@@ -478,7 +610,5 @@ class HUD:
                 font_scale=0.55,
                 thickness=2,
             )
-
-        self.draw_telemetry(frame, gestures, fps)
 
 
