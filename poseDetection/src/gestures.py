@@ -160,6 +160,8 @@ class SteeringEngine:
 
         p1_left_power = 0.0
         p2_right_power = 0.0
+        margin = self.config.margin
+        use_time_steering = getattr(self.config, "time_based_position", True)
         strategy = getattr(self.config, "strategy", "position").lower()
 
         if strategy in ("inclination", "lean", "spine"):
@@ -292,6 +294,7 @@ class DuoGestureDetector:
 
         self.cruise_control: bool = False
         self.prev_hands_up: bool = False
+        self.turn_start_time: Optional[float] = None
 
     def toggle_rescue_mode(self) -> str:
         """Toggles rescue mode between 'color' and 'jump'."""
@@ -438,9 +441,26 @@ class DuoGestureDetector:
 
         accelerate = self.cruise_control and not brake
 
+        corner_lift = False
+        if accelerate and getattr(self.config.gestures, "cornering_lift_enabled", True):
+            threshold = getattr(self.config.gestures, "cornering_lift_steer_threshold", 0.45)
+            max_dur = getattr(self.config.gestures, "corner_lift_max_duration_s", 0.65)
+            if steering.intensity >= threshold:
+                if self.turn_start_time is None:
+                    self.turn_start_time = timestamp
+                # Temporarily lift off throttle during initial turn entry (< 0.65s) to carve corner
+                if (timestamp - self.turn_start_time) < max_dur:
+                    corner_lift = True
+                    accelerate = False
+            else:
+                self.turn_start_time = None
+        else:
+            self.turn_start_time = None
+
         return GestureResult(
             steering=steering,
             accelerate=accelerate,
+            corner_lift=corner_lift,
             cruise_control=self.cruise_control,
             brake=brake,
             rescue=rescue,

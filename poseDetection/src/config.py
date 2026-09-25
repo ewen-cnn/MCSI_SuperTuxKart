@@ -45,6 +45,11 @@ class GestureConfig:
     default_jump_y: float = 0.30
     rescue_mode: str = "color"
 
+    # Cornering Throttle Reduction (relative acceleration: drops throttle while turning)
+    cornering_lift_enabled: bool = True
+    cornering_lift_steer_threshold: float = 0.45
+    corner_lift_max_duration_s: float = 0.65
+
 
 @dataclass
 class ColorConfig:
