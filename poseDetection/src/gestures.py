@@ -55,17 +55,45 @@ class SteeringEngine:
             period=self.config.pwm_period,
             full_steer_threshold=self.config.full_steer_intensity,
         )
-        # Hold timestamps for time-based threshold steering
-        self.p1_left_start: Optional[float] = None
-        self.p1_right_start: Optional[float] = None
-        self.p2_left_start: Optional[float] = None
-        self.p2_right_start: Optional[float] = None
+        # Unified hold timestamps for time-based threshold steering (prevents stale timers)
+        self.left_start: Optional[float] = None
+        self.right_start: Optional[float] = None
+
+    @property
+    def p1_left_start(self) -> Optional[float]:
+        return self.left_start
+
+    @p1_left_start.setter
+    def p1_left_start(self, val: Optional[float]):
+        self.left_start = val
+
+    @property
+    def p1_right_start(self) -> Optional[float]:
+        return self.right_start
+
+    @p1_right_start.setter
+    def p1_right_start(self, val: Optional[float]):
+        self.right_start = val
+
+    @property
+    def p2_left_start(self) -> Optional[float]:
+        return self.left_start
+
+    @p2_left_start.setter
+    def p2_left_start(self, val: Optional[float]):
+        self.left_start = val
+
+    @property
+    def p2_right_start(self) -> Optional[float]:
+        return self.right_start
+
+    @p2_right_start.setter
+    def p2_right_start(self, val: Optional[float]):
+        self.right_start = val
 
     def reset(self):
-        self.p1_left_start = None
-        self.p1_right_start = None
-        self.p2_left_start = None
-        self.p2_right_start = None
+        self.left_start = None
+        self.right_start = None
         self.modulator.reset()
 
     def _calc_time_power(
@@ -167,6 +195,9 @@ class SteeringEngine:
         eff_left = left_thresh if left_thresh is not None else getattr(self.config, "left_threshold", 0.40)
         eff_right = right_thresh if right_thresh is not None else getattr(self.config, "right_threshold", 0.60)
 
+        want_left = False
+        want_right = False
+
         if strategy in ("inclination", "lean", "spine"):
             p1_left_power, p2_right_power = self._calc_inclination_powers(p1, p2)
         elif p1 is not None and p2 is not None:
@@ -174,55 +205,32 @@ class SteeringEngine:
             # P1 can only activate the LEFT threshold line (< eff_left).
             # P2 can only activate the RIGHT threshold line (> eff_right).
             # Between eff_left and eff_right is the neutral zone.
-            if use_time_steering:
-                p1_left_power, self.p1_left_start = self._calc_time_power(
-                    p1.shoulder_x < eff_left, self.p1_left_start, timestamp
-                )
-                p2_right_power, self.p2_right_start = self._calc_time_power(
-                    p2.shoulder_x > eff_right, self.p2_right_start, timestamp
-                )
-            else:
-                if p1.shoulder_x < eff_left:
-                    p1_left_power = self._calc_distance_power(p1.shoulder_x, eff_left, margin, "LEFT")
-                if p2.shoulder_x > eff_right:
-                    p2_right_power = self._calc_distance_power(p2.shoulder_x, eff_right, margin, "RIGHT")
-
-        elif p1 is not None:
-            # Solo mode (player tracked as P1):
-            # Single player tests steering by crossing left_thresh (< eff_left) or right_thresh (> eff_right).
-            # Between eff_left and eff_right is the neutral zone.
-            if use_time_steering:
-                p1_left_power, self.p1_left_start = self._calc_time_power(
-                    p1.shoulder_x < eff_left, self.p1_left_start, timestamp
-                )
-                p2_right_power, self.p1_right_start = self._calc_time_power(
-                    p1.shoulder_x > eff_right, self.p1_right_start, timestamp
-                )
-            else:
-                if p1.shoulder_x < eff_left:
-                    p1_left_power = self._calc_distance_power(p1.shoulder_x, eff_left, margin, "LEFT")
-                elif p1.shoulder_x > eff_right:
-                    p2_right_power = self._calc_distance_power(p1.shoulder_x, eff_right, margin, "RIGHT")
-
-        elif p2 is not None:
-            # Solo mode (player tracked as P2):
-            # Single player tests steering by crossing left_thresh (< eff_left) or right_thresh (> eff_right).
-            # Between eff_left and eff_right is the neutral zone.
-            if use_time_steering:
-                p1_left_power, self.p2_left_start = self._calc_time_power(
-                    p2.shoulder_x < eff_left, self.p2_left_start, timestamp
-                )
-                p2_right_power, self.p2_right_start = self._calc_time_power(
-                    p2.shoulder_x > eff_right, self.p2_right_start, timestamp
-                )
-            else:
-                if p2.shoulder_x < eff_left:
-                    p1_left_power = self._calc_distance_power(p2.shoulder_x, eff_left, margin, "LEFT")
-                elif p2.shoulder_x > eff_right:
-                    p2_right_power = self._calc_distance_power(p2.shoulder_x, eff_right, margin, "RIGHT")
-
+            want_left = (p1.shoulder_x < eff_left)
+            want_right = (p2.shoulder_x > eff_right)
+        elif p1 is not None or p2 is not None:
+            # Solo mode (single player present, tracked as p1 or p2):
+            # The player can activate LEFT (< eff_left) or RIGHT (> eff_right).
+            player = p1 if p1 is not None else p2
+            want_left = (player.shoulder_x < eff_left)
+            want_right = (player.shoulder_x > eff_right)
         else:
             self.reset()
+
+        if strategy not in ("inclination", "lean", "spine"):
+            if use_time_steering:
+                p1_left_power, self.left_start = self._calc_time_power(
+                    want_left, self.left_start, timestamp
+                )
+                p2_right_power, self.right_start = self._calc_time_power(
+                    want_right, self.right_start, timestamp
+                )
+            else:
+                if want_left:
+                    val = p1.shoulder_x if p1 is not None else p2.shoulder_x
+                    p1_left_power = self._calc_distance_power(val, eff_left, margin, "LEFT")
+                if want_right:
+                    val = p2.shoulder_x if p2 is not None else p1.shoulder_x
+                    p2_right_power = self._calc_distance_power(val, eff_right, margin, "RIGHT")
 
         net = p1_left_power - p2_right_power
         direction = None
@@ -235,7 +243,12 @@ class SteeringEngine:
             direction = "RIGHT"
             intensity = abs(net)
 
-        active = self.modulator.update(direction, intensity, timestamp=timestamp)
+        # Steering actuation: False = solid 100% direct keypress; True = PWM pulsed duty-cycle
+        enable_pwm = getattr(self.config, "enable_pwm", False)
+        if enable_pwm:
+            active = self.modulator.update(direction, intensity, timestamp=timestamp)
+        else:
+            active = (direction is not None and intensity > 0.0)
 
         return SteeringState(
             direction=direction,

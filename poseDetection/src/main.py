@@ -17,7 +17,8 @@ def run_controller(config: Optional[AppConfig] = None):
     right_th = getattr(cfg.steering, "right_threshold", 0.60)
     is_narrow = abs((right_th - left_th) - 0.20) < 0.08
     mode_str = "SOLO (Narrow Neutral Zone)" if is_narrow else "DUO (Wide Neutral Zone)"
-    print(f"Steering Setup: {mode_str} [Left: {left_th:.2f}, Right: {right_th:.2f}]")
+    act_str = "PWM Pulsed" if getattr(cfg.steering, "enable_pwm", False) else "Solid 100% Direct"
+    print(f"Steering Setup: {mode_str} [Left: {left_th:.2f}, Right: {right_th:.2f}] | Actuation: {act_str}")
     print("Controls:")
     print("  'c' / 'C' : Calibrate brake line to current shoulder height")
     print("  'a' / 'A' : Toggle cruise control (acceleration) [or raise hand]")
@@ -107,11 +108,19 @@ def main():
         default=None,
         help="Optional preset override: 'solo' (narrow neutral zone [0.40, 0.60]) or 'duo' (wide neutral zone [0.30, 0.70])",
     )
+    parser.add_argument(
+        "--pwm",
+        action="store_true",
+        default=False,
+        help="Enable PWM pulsed modulation on steering keys (default: False, solid 100% direct steering)",
+    )
     args = parser.parse_args()
 
     cfg = AppConfig()
     if args.steering:
         cfg.steering.strategy = args.steering
+    if args.pwm:
+        cfg.steering.enable_pwm = True
     if args.mode == "solo":
         cfg.steering.left_threshold = 0.40
         cfg.steering.right_threshold = 0.60
