@@ -12,6 +12,24 @@ class CameraConfig:
 
 @dataclass
 class SteeringConfig:
+    # -------------------------------------------------------------------------
+    # HARDCODED STEERING THRESHOLDS & CENTRAL NEUTRAL ZONE
+    # There are two threshold lines with a central neutral zone in the middle.
+    # Crossing left_threshold to the left triggers LEFT steer.
+    # Crossing right_threshold to the right triggers RIGHT steer.
+    # In duo mode: left line can only be activated by P1, right line by P2.
+    # In solo mode: a single player can cross either line to steer left or right.
+    # -------------------------------------------------------------------------
+
+    # === MODE 1: SOLO MODE (Small neutral zone for testing alone) ===
+    left_threshold: float = 0.40
+    right_threshold: float = 0.60
+
+    # === MODE 2: DUO / COLLABORATIVE MODE (Bigger neutral zone between two players) ===
+    # To switch to Duo Mode, uncomment the two lines below and comment the two lines above:
+    # left_threshold: float = 0.30
+    # right_threshold: float = 0.70
+
     deadzone: float = 0.05
     margin: float = 0.08
     p1_center_x: float = 0.28

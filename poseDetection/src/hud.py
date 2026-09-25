@@ -132,26 +132,24 @@ class HUD:
         for y_seg in range(0, h, 16):
             cv2.line(frame, (mid_x, y_seg), (mid_x, min(h, y_seg + 8)), (70, 70, 70), 1, cv2.LINE_AA)
 
-        # P1 Fixed Neutral Box (Left)
-        deadzone_p1 = max(0.02, abs(p1_neutral_x - left_thresh))
-        p1_l = int((p1_neutral_x - deadzone_p1) * w)
-        p1_r = int((p1_neutral_x + deadzone_p1) * w)
-        cv2.rectangle(overlay, (p1_l, 0), (p1_r, h), COLOR_NEUTRAL_BG, -1)
-        cv2.line(frame, (p1_l, 0), (p1_l, h), COLOR_NEUTRAL_LINE, 2, cv2.LINE_AA)
-        cv2.line(frame, (p1_r, 0), (p1_r, h), (90, 90, 90), 1, cv2.LINE_AA)
-        HUD.draw_badge(
-            frame, "◄ P1 NEUTRAL ►", ((p1_l + p1_r) // 2 - 50, h - 15), (220, 220, 220), font_scale=0.38
-        )
+        # Two threshold lines defining the central neutral zone
+        lx = int(left_thresh * w)
+        rx = int(right_thresh * w)
 
-        # P2 Fixed Neutral Box (Right)
-        deadzone_p2 = max(0.02, abs(right_thresh - p2_neutral_x))
-        p2_l = int((p2_neutral_x - deadzone_p2) * w)
-        p2_r = int((p2_neutral_x + deadzone_p2) * w)
-        cv2.rectangle(overlay, (p2_l, 0), (p2_r, h), COLOR_NEUTRAL_BG, -1)
-        cv2.line(frame, (p2_l, 0), (p2_l, h), (90, 90, 90), 1, cv2.LINE_AA)
-        cv2.line(frame, (p2_r, 0), (p2_r, h), COLOR_NEUTRAL_LINE, 2, cv2.LINE_AA)
+        # Central Neutral Zone between left_thresh and right_thresh
+        cv2.rectangle(overlay, (lx, 0), (rx, h), COLOR_NEUTRAL_BG, -1)
+        cv2.line(frame, (lx, 0), (lx, h), COLOR_NEUTRAL_LINE, 2, cv2.LINE_AA)
+        cv2.line(frame, (rx, 0), (rx, h), COLOR_NEUTRAL_LINE, 2, cv2.LINE_AA)
+
+        neutral_mid = (lx + rx) // 2
         HUD.draw_badge(
-            frame, "◄ P2 NEUTRAL ►", ((p2_l + p2_r) // 2 - 50, h - 15), (220, 220, 220), font_scale=0.38
+            frame, "◄── NEUTRAL ZONE ──►", (neutral_mid - 70, h - 15), (220, 220, 220), font_scale=0.38
+        )
+        HUD.draw_badge(
+            frame, "◄ STEER LEFT", (max(10, lx - 95), h - 15), (0, 255, 120), font_scale=0.38
+        )
+        HUD.draw_badge(
+            frame, "STEER RIGHT ►", (min(w - 110, rx + 10), h - 15), (0, 255, 120), font_scale=0.38
         )
 
         cv2.addWeighted(overlay, 0.20, frame, 0.80, 0, frame)

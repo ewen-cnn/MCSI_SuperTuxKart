@@ -13,7 +13,11 @@ from hud import HUD
 def run_controller(config: Optional[AppConfig] = None):
     cfg = config or DEFAULT_CONFIG
 
-    print("Starting SuperTuxKart Vision Controller (Z-Depth Filtered Pose)...")
+    left_th = getattr(cfg.steering, "left_threshold", 0.40)
+    right_th = getattr(cfg.steering, "right_threshold", 0.60)
+    is_narrow = abs((right_th - left_th) - 0.20) < 0.08
+    mode_str = "SOLO (Narrow Neutral Zone)" if is_narrow else "DUO (Wide Neutral Zone)"
+    print(f"Steering Setup: {mode_str} [Left: {left_th:.2f}, Right: {right_th:.2f}]")
     print("Controls:")
     print("  'c' / 'C' : Calibrate brake line to current shoulder height")
     print("  'a' / 'A' : Toggle cruise control (acceleration) [or raise hand]")
@@ -97,11 +101,23 @@ def main():
         default=None,
         help="Steering strategy: 'position' (time-based threshold) or 'inclination' (spine torso tilt)",
     )
+    parser.add_argument(
+        "--mode",
+        choices=["solo", "duo"],
+        default=None,
+        help="Optional preset override: 'solo' (narrow neutral zone [0.40, 0.60]) or 'duo' (wide neutral zone [0.30, 0.70])",
+    )
     args = parser.parse_args()
 
     cfg = AppConfig()
     if args.steering:
         cfg.steering.strategy = args.steering
+    if args.mode == "solo":
+        cfg.steering.left_threshold = 0.40
+        cfg.steering.right_threshold = 0.60
+    elif args.mode == "duo":
+        cfg.steering.left_threshold = 0.30
+        cfg.steering.right_threshold = 0.70
 
     run_controller(config=cfg)
 
