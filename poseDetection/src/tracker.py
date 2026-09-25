@@ -54,29 +54,62 @@ class PoseTracker:
         self.prev_p1: Optional[PlayerPose] = None
         self.prev_p2: Optional[PlayerPose] = None
 
+        # Tracking continuity and depth jump hysteresis
+        self.last_p1_x: float = 0.28
+        self.last_p2_x: float = 0.72
+        self.last_p1_span: Optional[float] = None
+        self.last_p2_span: Optional[float] = None
+        self.p1_lost_time: Optional[float] = None
+        self.p2_lost_time: Optional[float] = None
+
     def reset(self):
         self.p1_smoother.reset()
         self.p2_smoother.reset()
         self.prev_p1 = None
         self.prev_p2 = None
+        self.last_p1_span = None
+        self.last_p2_span = None
+        self.p1_lost_time = None
+        self.p2_lost_time = None
+
+    def _handle_loss(self, timestamp: float):
+        timeout = getattr(self.filter_config, "timeout_seconds", 0.6)
+        if self.p1_lost_time is None:
+            self.p1_lost_time = timestamp
+        elif (timestamp - self.p1_lost_time) > timeout:
+            self.last_p1_span = None
+            self.last_p1_x = 0.28
+
+        if self.p2_lost_time is None:
+            self.p2_lost_time = timestamp
+        elif (timestamp - self.p2_lost_time) > timeout:
+            self.last_p2_span = None
+            self.last_p2_x = 0.72
 
     def process(
         self, frame_bgr, timestamp: Optional[float] = None
     ) -> Tuple[Optional[PlayerPose], Optional[PlayerPose]]:
+        if frame_bgr is None or not hasattr(frame_bgr, "shape") or frame_bgr.size == 0 or len(frame_bgr.shape) != 3:
+            return None, None
+
         if timestamp is None:
             timestamp = time.time()
 
-        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
-        result = self.detector.detect(mp_image)
-
-        if not result.pose_landmarks:
+        try:
+            frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
+            result = self.detector.detect(mp_image)
+        except Exception:
             return None, None
 
-        foreground_candidates: List[PlayerPose] = []
+        if not result.pose_landmarks:
+            self._handle_loss(timestamp)
+            return None, None
+
+        raw_candidates: List[PlayerPose] = []
         for lm in result.pose_landmarks:
             pose = PlayerPose.from_landmarks(lm)
-            if pose is None:
+            if pose is None or not pose.is_valid_detection():
                 continue
 
             # Check shoulder visibility
@@ -85,46 +118,72 @@ class PoseTracker:
                 continue
 
             # 1. Reject background people using shoulder span (visual scale)
-            # Foreground players sitting in front have wide shoulders (>= min_shoulder_span)
             if pose.shoulder_span < self.config.min_shoulder_span:
                 continue
 
             # 2. Reject background people using MediaPipe relative Z-depth
-            # Foreground players have negative/small Z; people in the back have large Z
             if pose.depth_z > self.config.max_depth_z:
                 continue
 
-            foreground_candidates.append(pose)
+            raw_candidates.append(pose)
 
-        if not foreground_candidates:
+        if not raw_candidates:
+            self._handle_loss(timestamp)
             return None, None
 
-        # Partition foreground candidates into P1 (Left side: shoulder_x < 0.50)
-        # and P2 (Right side: shoulder_x >= 0.50)
-        p1_candidates = [p for p in foreground_candidates if p.shoulder_x < 0.50]
-        p2_candidates = [p for p in foreground_candidates if p.shoulder_x >= 0.50]
+        # 3. Dynamic Depth Clustering & Visual Scale Ratio
+        # Sort candidates by foreground score (closest Z-depth & widest span)
+        raw_candidates.sort(key=lambda p: p.foreground_score, reverse=True)
+        primary = raw_candidates[0]
+        foreground_candidates: List[PlayerPose] = [primary]
+
+        max_depth_gap = getattr(self.config, "max_relative_depth_diff", 0.15)
+        min_scale_ratio = getattr(self.config, "min_shoulder_scale_ratio", 0.55)
+
+        for cand in raw_candidates[1:]:
+            # Dynamic Relative Depth Gap: Reject if standing significantly behind primary player
+            if (cand.depth_z - primary.depth_z) > max_depth_gap:
+                continue
+            # Visual Scale Ratio: Reject if perspective width is too small relative to front player
+            if primary.shoulder_span > 0.05 and (cand.shoulder_span / primary.shoulder_span) < min_scale_ratio:
+                continue
+            foreground_candidates.append(cand)
+            if len(foreground_candidates) >= 2:
+                break
+
+        # 4. Partition into P1 (Left territory <= 0.55) and P2 (Right territory >= 0.45)
+        # with distance jump hysteresis to prevent spectators from hijacking when ducking
+        def is_depth_jump(cand: PlayerPose, last_span: Optional[float]) -> bool:
+            if last_span is None:
+                return False
+            return (cand.shoulder_span / last_span) < 0.60
+
+        p1_candidates = [
+            p for p in foreground_candidates
+            if p.shoulder_x <= 0.55 and not is_depth_jump(p, self.last_p1_span)
+        ]
+        p2_candidates = [
+            p for p in foreground_candidates
+            if p.shoulder_x >= 0.45 and not is_depth_jump(p, self.last_p2_span)
+        ]
 
         raw_p1: Optional[PlayerPose] = None
         raw_p2: Optional[PlayerPose] = None
 
         if p1_candidates:
-            if self.prev_p1 is not None:
-                # Prefer candidate closest to previous P1 position with high foreground score
-                raw_p1 = max(
-                    p1_candidates,
-                    key=lambda p: p.foreground_score - 1.5 * abs(p.shoulder_x - self.prev_p1.shoulder_x),
-                )
-            else:
-                raw_p1 = max(p1_candidates, key=lambda p: p.foreground_score)
+            raw_p1 = max(
+                p1_candidates,
+                key=lambda p: p.foreground_score - 1.5 * abs(p.shoulder_x - self.last_p1_x),
+            )
 
         if p2_candidates:
-            if self.prev_p2 is not None:
+            # Avoid picking the same person for both P1 and P2
+            remaining_p2 = [p for p in p2_candidates if p is not raw_p1]
+            if remaining_p2:
                 raw_p2 = max(
-                    p2_candidates,
-                    key=lambda p: p.foreground_score - 1.5 * abs(p.shoulder_x - self.prev_p2.shoulder_x),
+                    remaining_p2,
+                    key=lambda p: p.foreground_score - 1.5 * abs(p.shoulder_x - self.last_p2_x),
                 )
-            else:
-                raw_p2 = max(p2_candidates, key=lambda p: p.foreground_score)
 
         # Hysteresis for solo player leaning near center divider
         if len(foreground_candidates) == 1:
@@ -135,11 +194,35 @@ class PoseTracker:
                 else:
                     raw_p2 = only_player
             elif raw_p1 is None and raw_p2 is not None:
-                if self.prev_p2 is not None and abs(only_player.shoulder_x - self.prev_p2.shoulder_x) < 0.35:
+                if abs(only_player.shoulder_x - self.last_p2_x) < 0.35:
                     raw_p2 = only_player
             elif raw_p2 is None and raw_p1 is not None:
-                if self.prev_p1 is not None and abs(only_player.shoulder_x - self.prev_p1.shoulder_x) < 0.35:
+                if abs(only_player.shoulder_x - self.last_p1_x) < 0.35:
                     raw_p1 = only_player
+
+        # Update P1 tracking state
+        if raw_p1 is not None:
+            self.last_p1_x = raw_p1.shoulder_x
+            self.last_p1_span = raw_p1.shoulder_span
+            self.p1_lost_time = None
+        else:
+            if self.p1_lost_time is None:
+                self.p1_lost_time = timestamp
+            elif (timestamp - self.p1_lost_time) > getattr(self.filter_config, "timeout_seconds", 0.6):
+                self.last_p1_span = None
+                self.last_p1_x = 0.28
+
+        # Update P2 tracking state
+        if raw_p2 is not None:
+            self.last_p2_x = raw_p2.shoulder_x
+            self.last_p2_span = raw_p2.shoulder_span
+            self.p2_lost_time = None
+        else:
+            if self.p2_lost_time is None:
+                self.p2_lost_time = timestamp
+            elif (timestamp - self.p2_lost_time) > getattr(self.filter_config, "timeout_seconds", 0.6):
+                self.last_p2_span = None
+                self.last_p2_x = 0.72
 
         p1 = self.p1_smoother.smooth(raw_p1, timestamp) if raw_p1 else None
         p2 = self.p2_smoother.smooth(raw_p2, timestamp) if raw_p2 else None
