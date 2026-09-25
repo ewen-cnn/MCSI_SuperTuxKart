@@ -26,17 +26,17 @@ class SteeringConfig:
 
     # Time-based position steering (starts turning on threshold, ramps over time)
     time_based_position: bool = True
-    time_steer_base_intensity: float = 0.25   # Initial PWM power on crossing threshold
-    time_steer_ramp_seconds: float = 0.70     # Duration of continuous hold to reach 100% full lock
+    time_steer_base_intensity: float = 0.15   # Gentle initial turn on crossing line (was 0.25)
+    time_steer_ramp_seconds: float = 1.10     # Extended ramp time to 1.1s for smoother, less sensitive lock (was 0.70s)
 
     # Inclination steering settings (spine torso tilt from hip midpoint to shoulder midpoint)
     inclination_mode: str = "spine"           # 'spine' (hip to shoulder vector) or 'shoulders' (shoulder line tilt)
-    lean_deadzone_deg: float = 3.5            # Deadzone degrees to ignore natural micro-wobbles
-    lean_max_deg: float = 16.0                # Degrees for 100% full steering lock
+    lean_deadzone_deg: float = 4.0            # Deadzone degrees to ignore natural micro-wobbles (was 3.5)
+    lean_max_deg: float = 24.0                # Degrees for 100% full steering lock (was 16.0)
 
     # Solo testing steering settings (tight neutral zone centered on solo player)
-    solo_deadzone: float = 0.04               # Tight deadzone half-width for solo player (+/- 4% of screen)
-    solo_margin: float = 0.10                 # Travel margin for solo steering ramp
+    solo_deadzone: float = 0.05               # Deadzone half-width for solo player (+/- 5% of screen)
+    solo_margin: float = 0.18                 # Wider travel margin for smooth progressive steering
 
 
 @dataclass
