@@ -17,7 +17,6 @@ def run_controller(config: Optional[AppConfig] = None):
     print("Controls:")
     print("  'c' / 'C' : Calibrate brake line to current shoulder height")
     print("  'a' / 'A' : Toggle cruise control (acceleration) [or raise hand]")
-    print("  's' / 'S' : Toggle steering strategy (position vs inclination)")
     print("  'd' / 'D' : Toggle clean arcade HUD vs debug telemetry view")
     print("  'q' / ESC : Exit application\n")
 
@@ -75,15 +74,6 @@ def run_controller(config: Optional[AppConfig] = None):
                     hud.show_message("Brake line calibrated!", duration=2.5, color=(0, 255, 120))
                 elif key in (ord("a"), ord("A")):
                     detector.cruise_control = not detector.cruise_control
-                elif key in (ord("s"), ord("S")):
-                    cur = cfg.steering.strategy.lower()
-                    new_strategy = "inclination" if cur == "position" else "position"
-                    cfg.steering.strategy = new_strategy
-                    detector.steering_engine.config.strategy = new_strategy
-                    detector.steering_engine.reset()
-                    msg = f"STEERING: {new_strategy.upper()}"
-                    print(f"[STEERING] Strategy switched to: {new_strategy}")
-                    hud.show_message(msg, duration=2.0, color=(0, 220, 255))
                 elif key in (ord("d"), ord("D")):
                     is_dbg = hud.toggle_debug()
                     status = "DEBUG TELEMETRY" if is_dbg else "CLEAN VIEW"
