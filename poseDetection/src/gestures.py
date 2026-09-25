@@ -48,7 +48,7 @@ class PWMModulator:
 
 
 class SteeringEngine:
-    """Calculates normalized steering power for duo and solo modes."""
+    """Calculates normalized steering power for duo and solo modes using time-based threshold ramps."""
 
     def __init__(self, config: SteeringConfig = SteeringConfig()):
         self.config = config
@@ -56,9 +56,38 @@ class SteeringEngine:
             period=self.config.pwm_period,
             full_steer_threshold=self.config.full_steer_intensity,
         )
+        # Hold timestamps for time-based threshold steering
+        self.p1_left_start: Optional[float] = None
+        self.p1_right_start: Optional[float] = None
+        self.p2_left_start: Optional[float] = None
+        self.p2_right_start: Optional[float] = None
+
+    def reset(self):
+        self.p1_left_start = None
+        self.p1_right_start = None
+        self.p2_left_start = None
+        self.p2_right_start = None
+        self.modulator.reset()
+
+    def _calc_time_power(
+        self, is_active: bool, start_time: Optional[float], now: float
+    ) -> Tuple[float, Optional[float]]:
+        if not is_active:
+            return 0.0, None
+
+        if start_time is None:
+            start_time = now
+
+        duration = max(0.0, now - start_time)
+        ramp_time = getattr(self.config, "time_steer_ramp_seconds", 0.70)
+        base_int = getattr(self.config, "time_steer_base_intensity", 0.25)
+
+        progress = min(1.0, duration / max(1e-4, ramp_time))
+        power = base_int + (1.0 - base_int) * progress
+        return float(min(1.0, power)), start_time
 
     @staticmethod
-    def _calc_power(val: float, limit: float, margin: float, direction: str) -> float:
+    def _calc_distance_power(val: float, limit: float, margin: float, direction: str) -> float:
         if direction == "LEFT":
             travel = max(1e-4, limit - margin)
             return min(1.0, max(0.0, (limit - val) / travel))
@@ -76,29 +105,61 @@ class SteeringEngine:
         p2_neutral_x: float,
         timestamp: Optional[float] = None,
     ) -> SteeringState:
+        if timestamp is None:
+            timestamp = time.time()
+
         p1_left_power = 0.0
         p2_right_power = 0.0
         margin = self.config.margin
-        deadzone = self.config.deadzone
+        use_time_steering = getattr(self.config, "time_based_position", True)
 
         if p1 is not None and p2 is not None:
             # Duo mode: P1 controls left, P2 controls right
-            if p1.shoulder_x < left_thresh:
-                p1_left_power = self._calc_power(p1.shoulder_x, left_thresh, margin, "LEFT")
-            if p2.shoulder_x > right_thresh:
-                p2_right_power = self._calc_power(p2.shoulder_x, right_thresh, margin, "RIGHT")
+            if use_time_steering:
+                p1_left_power, self.p1_left_start = self._calc_time_power(
+                    p1.shoulder_x < left_thresh, self.p1_left_start, timestamp
+                )
+                p2_right_power, self.p2_right_start = self._calc_time_power(
+                    p2.shoulder_x > right_thresh, self.p2_right_start, timestamp
+                )
+            else:
+                if p1.shoulder_x < left_thresh:
+                    p1_left_power = self._calc_distance_power(p1.shoulder_x, left_thresh, margin, "LEFT")
+                if p2.shoulder_x > right_thresh:
+                    p2_right_power = self._calc_distance_power(p2.shoulder_x, right_thresh, margin, "RIGHT")
+
         elif p1 is not None:
             # Solo mode (P1)
-            if p1.shoulder_x < left_thresh:
-                p1_left_power = self._calc_power(p1.shoulder_x, left_thresh, margin, "LEFT")
-            elif p1.shoulder_x > right_thresh:
-                p2_right_power = self._calc_power(p1.shoulder_x, right_thresh, margin, "RIGHT")
+            if use_time_steering:
+                p1_left_power, self.p1_left_start = self._calc_time_power(
+                    p1.shoulder_x < left_thresh, self.p1_left_start, timestamp
+                )
+                p2_right_power, self.p1_right_start = self._calc_time_power(
+                    p1.shoulder_x > right_thresh, self.p1_right_start, timestamp
+                )
+            else:
+                if p1.shoulder_x < left_thresh:
+                    p1_left_power = self._calc_distance_power(p1.shoulder_x, left_thresh, margin, "LEFT")
+                elif p1.shoulder_x > right_thresh:
+                    p2_right_power = self._calc_distance_power(p1.shoulder_x, right_thresh, margin, "RIGHT")
+
         elif p2 is not None:
             # Solo mode (P2)
-            if p2.shoulder_x < left_thresh:
-                p1_left_power = self._calc_power(p2.shoulder_x, left_thresh, margin, "LEFT")
-            elif p2.shoulder_x > right_thresh:
-                p2_right_power = self._calc_power(p2.shoulder_x, right_thresh, margin, "RIGHT")
+            if use_time_steering:
+                p1_left_power, self.p2_left_start = self._calc_time_power(
+                    p2.shoulder_x < left_thresh, self.p2_left_start, timestamp
+                )
+                p2_right_power, self.p2_right_start = self._calc_time_power(
+                    p2.shoulder_x > right_thresh, self.p2_right_start, timestamp
+                )
+            else:
+                if p2.shoulder_x < left_thresh:
+                    p1_left_power = self._calc_distance_power(p2.shoulder_x, left_thresh, margin, "LEFT")
+                elif p2.shoulder_x > right_thresh:
+                    p2_right_power = self._calc_distance_power(p2.shoulder_x, right_thresh, margin, "RIGHT")
+
+        else:
+            self.reset()
 
         net = p1_left_power - p2_right_power
         direction = None
