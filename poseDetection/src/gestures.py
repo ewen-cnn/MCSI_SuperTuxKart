@@ -289,6 +289,10 @@ class DuoGestureDetector:
             steering_config=st_cfg,
         )
         self.rescue_mode: str = ge_cfg.rescue_mode
+        self.accel_modulator = PWMModulator(
+            period=getattr(ge_cfg, "accel_pwm_period", 0.15),
+            full_steer_threshold=0.98,
+        )
 
         self.cruise_control: bool = False
         self.prev_hands_up: bool = False
@@ -398,10 +402,10 @@ class DuoGestureDetector:
         brake = p1_brake or p2_brake
         rescue = p1_jump or p2_jump
 
-        accelerate = self.cruise_control and not brake
+        raw_accelerate = self.cruise_control and not brake
 
         corner_lift = False
-        if accelerate and getattr(self.config.gestures, "cornering_lift_enabled", True):
+        if raw_accelerate and getattr(self.config.gestures, "cornering_lift_enabled", True):
             threshold = getattr(self.config.gestures, "cornering_lift_steer_threshold", 0.45)
             max_dur = getattr(self.config.gestures, "corner_lift_max_duration_s", 0.65)
             if steering.intensity >= threshold:
@@ -410,15 +414,28 @@ class DuoGestureDetector:
                 # Temporarily lift off throttle during initial turn entry (< 0.65s) to carve corner
                 if (timestamp - self.turn_start_time) < max_dur:
                     corner_lift = True
-                    accelerate = False
+                    raw_accelerate = False
             else:
                 self.turn_start_time = None
         else:
             self.turn_start_time = None
 
+        accel_intensity = getattr(self.config.gestures, "max_accel_intensity", 0.80)
+        modulate = getattr(self.config.gestures, "modulate_accel", True)
+        if raw_accelerate:
+            if modulate and accel_intensity < 0.98:
+                accelerate = self.accel_modulator.update("ACCEL", accel_intensity, timestamp=timestamp)
+            else:
+                accelerate = True
+        else:
+            self.accel_modulator.reset()
+            accelerate = False
+
         return GestureResult(
             steering=steering,
             accelerate=accelerate,
+            raw_accelerate=raw_accelerate,
+            accel_intensity=accel_intensity,
             corner_lift=corner_lift,
             cruise_control=self.cruise_control,
             brake=brake,
