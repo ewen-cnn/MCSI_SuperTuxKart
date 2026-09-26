@@ -53,10 +53,14 @@ class KartState:
     def fire(self):
         """Lance un objet."""
         self.sender.send('FIRE')
-
+        if self.debug:
+            print(GREEN + '\tcarton rouge -> Fire' + WHITE)
+            
     def rescue(self):
         """Sauvetage par l'oiseau : replace le kart sur la piste."""
         self.sender.send('RESCUE')
+        if self.debug:
+            print(GREEN + '\tsecousse -> RESCUE' + WHITE)
 
     def set_skidding(self, active):
         """Maintient la touche de derapage tant que active est vrai."""

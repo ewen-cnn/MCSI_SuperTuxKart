@@ -1,11 +1,13 @@
 // Confguration
 
 const int ledPin=13;
+const int PIN_VIBRATION = 2;
 
 int max_analog_dta      = 300;              // max analog data
 int min_analog_dta      = 100;              // min analog data
 int static_analog_dta   = 0;                // mean analog data
 
+bool previous_vibrationSensor = false;
 
 bool contraction_detected = false;
 bool previous_contraction = false;
@@ -42,8 +44,6 @@ void calibration(){
 }
 
 
-
-
 void setup() {
     Serial.begin(115200);
     pinMode(ledPin,OUTPUT);
@@ -54,26 +54,25 @@ void setup() {
 }
 
 void loop() {
-    int vibrationSensor = digitalRead(2);
+    int vibrationSensor = digitalRead(PIN_VIBRATION);
     int muscleSensor = analogRead(A0);
 
-
-    if(vibrationSensor == HIGH)
+    if(vibrationSensor == HIGH and previous_vibrationSensor == LOW)
     {
       digitalWrite(ledPin,HIGH);
       Serial.println("vibrationSensor");
     }
     else{
       digitalWrite(ledPin,LOW);
-
     }
-    if (contraction_detected =(muscleSensor>static_analog_dta-10)){         
+    previous_vibrationSensor = vibrationSensor;
+
+    if (contraction_detected = ( muscleSensor > static_analog_dta - 10 )){         
       if (contraction_detected && !previous_contraction) //nouvelle contraction détectée
       {
         state=!state;
-        Serial.println("Contraction détectée");
+        Serial.println("Contraction");
       }
     }
     previous_contraction = contraction_detected;
-    delay(100);
 }
