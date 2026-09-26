@@ -798,17 +798,11 @@ def main():
             direction = zone(nx, DEAD_ZONE_X, 'LEFT', 'RIGHT')
             niveau = intensity(nx, DEAD_ZONE_X)
 
-            # A l'amorce, on court-circuite la MLI : le jeu fige le sens du
-            # derapage a l'instant ou P_SKIDDING part, et il faut qu'une
-            # fleche soit enfoncee a ce moment-la.
             amorce = kart.skidding_on and (now - skid_started_at) < SKID_KICKOFF
             if amorce and direction != 'NONE':
                 skid_direction = direction
 
-            # Pendant la glisse, le jeu remappe le braquage [-1, 1] vers
-            # [0.2, 0.8] : dans le virage -> 0.8 (serre), rien -> 0.5,
-            # contre le virage -> 0.2 (large). On ne plafonne donc que le
-            # sens du virage, pour eviter la courbe la plus serree.
+
             if kart.skidding_on and direction == skid_direction:
                 niveau = min(niveau, SKID_INTO_MAX)
 
@@ -817,9 +811,6 @@ def main():
             else:
                 kart.set_steering('NONE')
 
-            # La traction reste tout ou rien : en course on veut le pied au
-            # plancher ou le frein, pas 40 % d'accelerateur. ContinuousCommand
-            # est reutilisable telle quelle si tu veux la doser aussi.
             kart.set_throttle(zone(ny, DEAD_ZONE_Y, 'BRAKE', 'ACCELERATE'))
 
             time.sleep(period)

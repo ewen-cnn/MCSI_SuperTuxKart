@@ -47,18 +47,6 @@ class ContinuousCommand:
 ############################# Double-Tap ######################################
 ###############################################################################
 class TapDetector:
-
-    """
-    Reconnait deux gestes sur le pad a partir d'un SEUL decompte.
-
-    Au front montant, on lance le decompte. Ensuite :
-    - si le doigt reste pose au-dela de TAP_MAX_DURATION -> MAINTIEN (etat)
-    - si le doigt est leve avant                         -> c'est un TAP
-    - si ce tap a commence peu apres un tap precedent    -> DOUBLE-TAP (evenement)
-
-    Un contact est donc soit un tap, soit un maintien, jamais les deux.
-    """
-
     def __init__(self):
         self._touching = False
         self._touch_start = 0.0
