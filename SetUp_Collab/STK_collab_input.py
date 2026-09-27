@@ -84,7 +84,8 @@ def main():
     p1_eye2 = EyesValues()
     p1_camera = CameraState()
     p2_camera = CameraState()
-    fire_trigger = TriggerState()
+    fire_trigger = TriggerState(cooldown=1.4)
+    z_neutral_state = FloatState(default=DEFAULT_Z_NEUTRAL)
     osc = OSCThreadServer()
     steering_pwm = ContinuousCommand()
     
@@ -101,6 +102,7 @@ def main():
         p1_camera=p1_camera,
         p2_camera=p2_camera,
         fire_trigger=fire_trigger,
+        z_neutral=z_neutral_state,
     )
     print()
     color_tag = f", Objet: {color_mode.upper()}" if color_mode != "off" else ""
@@ -285,9 +287,16 @@ def main():
                 cx, cy, cz, cage = camera.snapshot()
 
             if cz is not None and cage <= SENSOR_TIMEOUT:
-                nz = normalize(cz, POS_Z_MIN, POS_Z_MAX)
-                # se rapprocher (cz petit) -> nz vaut -1 -> on accelere
-                kart.set_throttle(zone(-nz, DEAD_ZONE_Z, 'BRAKE', 'ACCELERATE'))
+                current_zn, _ = z_neutral_state.snapshot()
+                delta_z = cz - current_zn
+                # Se rapprocher (delta_z negatif < -DEAD_ZONE_Z_CM) -> on accelere
+                # S'eloigner (delta_z positif > +DEAD_ZONE_Z_CM) -> on freine
+                if delta_z < -DEAD_ZONE_Z_CM:
+                    kart.set_throttle('ACCELERATE')
+                elif delta_z > DEAD_ZONE_Z_CM:
+                    kart.set_throttle('BRAKE')
+                else:
+                    kart.set_throttle('NONE')
             else:
                 kart.set_throttle('NONE')
 

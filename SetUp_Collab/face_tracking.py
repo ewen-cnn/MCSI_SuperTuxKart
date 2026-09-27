@@ -214,6 +214,8 @@ def draw_hud(
     card_triggered: bool = False,
     card_detected: bool = False,
     card_bbox: Optional[Tuple[int, int, int, int]] = None,
+    z_neutral: float = DEFAULT_Z_NEUTRAL,
+    calib_z_msg: Optional[str] = None,
 ):
     """Dessine le HUD moderne en miroir avec zone de direction (P1) et zone de traction (P2)."""
     h, w, _ = frame.shape
@@ -312,7 +314,7 @@ def draw_hud(
     if active_mode == "duo" and p2 is not None and p2.is_valid:
         bx, by, bw, bh = p2.origin_x, p2.origin_y, p2.width, p2.height
         cv2.rectangle(frame, (bx, by), (bx + bw, by + bh), (0, 165, 255), 2)
-        cv2.putText(frame, "P2: VITESSE", (bx, max(45, by - 8)),
+        cv2.putText(frame, f"P2: VITESSE (Ref:{z_neutral:.0f}cm)", (bx, max(45, by - 8)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 165, 255), 1, cv2.LINE_AA)
 
         # Points yeux et nez/bouche
@@ -321,29 +323,31 @@ def draw_hud(
         if p2.nose_px:
             cv2.circle(frame, p2.nose_px, 3, (255, 255, 0), -1)
 
-        # Etat de vitesse
-        if p2.pos_z < (POS_Z_MIN + 5.0):
-            spd_lbl = f"ACCELERER ^ ({p2.pos_z:.0f} cm)"
+        # Etat de vitesse relatif au point neutre calibre
+        diff_z = p2.pos_z - z_neutral
+        if diff_z < -DEAD_ZONE_Z_CM:
+            spd_lbl = f"ACCELERER ^ ({p2.pos_z:.0f}cm, {-diff_z:.0f}cm plus pres)"
             spd_clr = (0, 255, 120)
-        elif p2.pos_z > (POS_Z_MAX - 5.0):
-            spd_lbl = f"FREINER v ({p2.pos_z:.0f} cm)"
+        elif diff_z > DEAD_ZONE_Z_CM:
+            spd_lbl = f"FREINER v ({p2.pos_z:.0f}cm, {diff_z:.0f}cm plus loin)"
             spd_clr = (0, 0, 255)
         else:
-            spd_lbl = f"ROUE LIBRE ({p2.pos_z:.0f} cm)"
+            spd_lbl = f"ROUE LIBRE ({p2.pos_z:.0f}cm | Neutre)"
             spd_clr = (180, 180, 180)
 
         cv2.putText(frame, spd_lbl, (bx, by + bh + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45, spd_clr, 2, cv2.LINE_AA)
 
     # 5. Affichage distance en mode Solo
     elif active_mode == "solo" and p1 is not None and p1.is_valid:
-        if p1.pos_z < (POS_Z_MIN + 5.0):
-            spd_lbl = f"ACCEL ({p1.pos_z:.0f} cm)"
+        diff_z = p1.pos_z - z_neutral
+        if diff_z < -DEAD_ZONE_Z_CM:
+            spd_lbl = f"ACCEL ({p1.pos_z:.0f}cm, {-diff_z:.0f}cm plus pres)"
             spd_clr = (0, 255, 120)
-        elif p1.pos_z > (POS_Z_MAX - 5.0):
-            spd_lbl = f"FREIN ({p1.pos_z:.0f} cm)"
+        elif diff_z > DEAD_ZONE_Z_CM:
+            spd_lbl = f"FREIN ({p1.pos_z:.0f}cm, {diff_z:.0f}cm plus loin)"
             spd_clr = (0, 0, 255)
         else:
-            spd_lbl = f"COAST ({p1.pos_z:.0f} cm)"
+            spd_lbl = f"ROUE LIBRE ({p1.pos_z:.0f}cm | Neutre)"
             spd_clr = (180, 180, 180)
 
         cv2.putText(frame, spd_lbl, (p1.origin_x, p1.origin_y + p1.height + 36),
@@ -351,12 +355,16 @@ def draw_hud(
 
     # 6. Detection d'objet colore (FIRE)
     if color_detector and color_detector.enabled:
-        color_detector.draw_hud_overlay(frame, card_triggered, card_detected, card_bbox)
+        color_detector.draw_hud_overlay(frame, card_triggered, card_detected, card_bbox, show_reticle=True)
 
-    # 7. Barre d'aide inferieure
-    steer_help = "Position" if steering_mode == "position" else "Inclinaison"
-    col_str = f" | Objet [{color_detector.preset.upper()}]: FIRE (C: Calib)" if (color_detector and color_detector.enabled) else ""
-    help_text = f"ESC: Quitter | Steer: {steer_help} | Z: Vitesse{col_str}"
+    # 7. Notification de calibration de distance (Z)
+    if calib_z_msg:
+        cv2.rectangle(frame, (10, 36), (w - 10, 68), (30, 30, 30), -1)
+        cv2.rectangle(frame, (10, 36), (w - 10, 68), (0, 255, 200), 2)
+        cv2.putText(frame, calib_z_msg, (18, 58), cv2.FONT_HERSHEY_SIMPLEX, 0.50, (0, 255, 200), 2, cv2.LINE_AA)
+
+    # 8. Barre d'aide inferieure
+    help_text = "ESC: Quitter | Z: Calib Distance | C: Calib Couleur | R: Reset Couleur"
     cv2.putText(
         frame,
         help_text,
@@ -427,6 +435,13 @@ def runtracking():
     prev_time = time.time()
     fps = 30.0
 
+    z_neutral = DEFAULT_Z_NEUTRAL
+    calib_z_msg = None
+    calib_z_until = 0.0
+    initial_z_samples = []
+    initial_calib_done = False
+    start_tracking_time = time.time()
+
     print("Tracking demarre ! Appuyez sur ESC pour quitter...\n")
 
     try:
@@ -446,7 +461,8 @@ def runtracking():
                 fps = 0.9 * fps + 0.1 * (1.0 / dt)
 
             # Detection d'objet colore pour lancer un objet (FIRE)
-            card_triggered, card_detected, card_bbox, card_color = color_detector.detect(img_bgr, now)
+            # card_triggered est une impulsion d'exactement 1 image pour eviter de vider 3 pouvoirs d'un coup
+            card_triggered, card_banner, card_detected, card_bbox, card_color = color_detector.detect(img_bgr, now)
             if card_triggered:
                 clientOSC.send_message(b"/tracker/fire", [1])
 
@@ -484,7 +500,20 @@ def runtracking():
                 if len(valid_faces) >= 1:
                     p1 = valid_faces[0]  # Joueur unique : fait tout
 
+            # Auto-calibrage de la distance neutre Z durant les 2.5 premieres secondes
+            speed_target = p2 if (active_mode == "duo" and p2) else p1
+            if not initial_calib_done and speed_target and speed_target.is_valid:
+                initial_z_samples.append(speed_target.pos_z)
+                if (now - start_tracking_time) > 2.5 and len(initial_z_samples) >= 8:
+                    z_neutral = round(float(np.mean(initial_z_samples)), 1)
+                    initial_calib_done = True
+                    calib_z_msg = f"Distance neutre de repos fixee a {z_neutral:.0f} cm"
+                    calib_z_until = now + 2.8
+                    clientOSC.send_message(b"/tracker/z_neutral", [float(z_neutral)])
+
             # Envoi des messages OSC
+            clientOSC.send_message(b"/tracker/z_neutral", [float(z_neutral)])
+
             if active_mode == "duo" and p1 and p2:
                 # Joueur 1 : Direction (yeux + tete)
                 clientOSC.send_message(b"/tracker/p1/eyes1/pos_xyz", [p1.eye1_px[0], p1.eye1_px[1]])
@@ -514,6 +543,7 @@ def runtracking():
 
             # Affichage graphique
             if not no_gui:
+                active_calib_msg = calib_z_msg if now < calib_z_until else None
                 draw_hud(
                     img_bgr,
                     p1,
@@ -522,9 +552,11 @@ def runtracking():
                     fps,
                     steering_mode=steering_mode,
                     color_detector=color_detector,
-                    card_triggered=card_triggered,
+                    card_triggered=card_banner,
                     card_detected=card_detected,
                     card_bbox=card_bbox,
+                    z_neutral=z_neutral,
+                    calib_z_msg=active_calib_msg,
                 )
                 cv2.imshow("SuperTuxKart - Face Tracking Collaboratif", img_bgr)
 
@@ -534,6 +566,19 @@ def runtracking():
                 elif (key == ord('c') or key == ord('C')) and color_detector.enabled:
                     ok, msg = color_detector.sample_from_center(img_bgr)
                     print(f"\n[Calibration Couleur] {msg}")
+                elif (key == ord('r') or key == ord('R')) and color_detector.enabled:
+                    msg = color_detector.reset_to_preset(args.color)
+                    print(f"\n[Reset Couleur] {msg}")
+                elif key == ord('z') or key == ord('Z'):
+                    if speed_target and speed_target.is_valid:
+                        z_neutral = round(speed_target.pos_z, 1)
+                        calib_z_msg = f"Distance neutre de repos calibree a {z_neutral:.0f} cm"
+                        calib_z_until = now + 2.8
+                        clientOSC.send_message(b"/tracker/z_neutral", [float(z_neutral)])
+                        print(f"\n[Calibration Vitesse] {calib_z_msg}")
+                    else:
+                        calib_z_msg = "Joueur vitesse non detecte pour calibrer la distance !"
+                        calib_z_until = now + 2.0
 
     except KeyboardInterrupt:
         pass

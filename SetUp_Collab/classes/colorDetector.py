@@ -130,6 +130,14 @@ class ColorCardDetector:
         med_s = int(np.median(valid[:, 1]))
         med_v = int(np.median(valid[:, 2]))
 
+        # Protection anti-echantillonnage de la peau humaine
+        is_skin_like = (med_h <= 22 or med_h >= 162) and (30 <= med_s <= 160) and (med_v >= 65)
+        if is_skin_like:
+            msg = "Couleur rejetee (trop proche de la peau) ! Tenez une carte coloree (ex: verte) devant le carre."
+            self.calibration_message = msg
+            self.calibration_msg_until = time.time() + 4.0
+            return False, msg
+
         # Tolerances adaptatives
         s_min = max(60, int(med_s - 50))
         v_min = max(40, int(med_v - 65))
@@ -153,6 +161,17 @@ class ColorCardDetector:
         self.calibration_message = msg
         self.calibration_msg_until = time.time() + 3.0
         return True, msg
+
+    def reset_to_preset(self, preset_name: str = "green") -> str:
+        """Reinitialise le detecteur sur un preset donne et annule le calibrage personnalise."""
+        self.preset = preset_name
+        self.custom_ranges = None
+        self.consecutive_detections = 0
+        self.was_detected = False
+        msg = f"Preset reinitialise : [{preset_name.upper()}]"
+        self.calibration_message = msg
+        self.calibration_msg_until = time.time() + 3.0
+        return msg
 
     def detect(
         self, frame: Optional[np.ndarray], now: Optional[float] = None
@@ -231,11 +250,12 @@ class ColorCardDetector:
         # Validation temporelle (doit etre present N images consecutives)
         confirmed_detected = detected and (self.consecutive_detections >= self.confirm_frames)
 
-        # Gestion du delai d'attente (cooldown) et declenchement du tir
+        # Delai d'attente (cooldown) et tir coup par coup
         cooldown_passed = (current_time - self.last_trigger_time) >= self.cooldown_seconds
         trigger_now = False
 
         if confirmed_detected:
+            # Tire EXCLUSIVEMENT au premier passage (front montant) quand le cooldown est passe
             if not self.was_detected and cooldown_passed:
                 self.last_trigger_time = current_time
                 self.trigger_until = current_time + self.pulse_duration
@@ -246,27 +266,55 @@ class ColorCardDetector:
             self.was_detected = False
             self.last_detected_bbox = None
 
-        triggered = (current_time < self.trigger_until) or trigger_now
-        return triggered, confirmed_detected, bbox, self.preset
+        banner_active = (current_time < self.trigger_until)
+        return trigger_now, banner_active, confirmed_detected, bbox, self.preset
 
-    def draw_hud_overlay(self, frame: np.ndarray, triggered: bool, detected: bool, bbox: Optional[Tuple[int, int, int, int]]):
+    def draw_hud_overlay(
+        self,
+        frame: np.ndarray,
+        banner_active: bool,
+        detected: bool,
+        bbox: Optional[Tuple[int, int, int, int]],
+        show_reticle: bool = True,
+    ):
         """Dessine les elements visuels du detecteur de couleur sur le flux camera."""
         h, w = frame.shape[:2]
         display_color = self.DISPLAY_COLORS.get(self.preset, (0, 0, 255))
+
+        # 0. Repere de visee centrale pour l'auto-calibrage avec C
+        if show_reticle:
+            rcx, rcy = w // 2, h // 2
+            half = 42
+            rx1, ry1 = rcx - half, rcy - half
+            rx2, ry2 = rcx + half, rcy + half
+            corner = 12
+            col_ret = (160, 160, 160)
+            # Coins du carre
+            cv2.line(frame, (rx1, ry1), (rx1 + corner, ry1), col_ret, 1)
+            cv2.line(frame, (rx1, ry1), (rx1, ry1 + corner), col_ret, 1)
+            cv2.line(frame, (rx2, ry1), (rx2 - corner, ry1), col_ret, 1)
+            cv2.line(frame, (rx2, ry1), (rx2, ry1 + corner), col_ret, 1)
+            cv2.line(frame, (rx1, ry2), (rx1 + corner, ry2), col_ret, 1)
+            cv2.line(frame, (rx1, ry2), (rx1, ry2 - corner), col_ret, 1)
+            cv2.line(frame, (rx2, ry2), (rx2 - corner, ry2), col_ret, 1)
+            cv2.line(frame, (rx2, ry2), (rx2, ry2 - corner), col_ret, 1)
+            cv2.putText(
+                frame, "CALIB (C)", (rx1 - 4, ry1 - 6),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.32, col_ret, 1, cv2.LINE_AA
+            )
 
         # 1. Rectangle autour de l'objet detecte
         if detected and bbox is not None:
             bx, by, bw, bh = bbox
             cv2.rectangle(frame, (bx, by), (bx + bw, by + bh), display_color, 2)
-            label = f"CARTE [{self.preset.upper()}] : FIRE!"
+            label = f"CARTE [{self.preset.upper()}]"
             cv2.putText(
                 frame, label, (bx, max(20, by - 8)),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.48, display_color, 2, cv2.LINE_AA
             )
 
         # 2. Banniere d'action quand l'objet est tire (FIRE)
-        if triggered:
-            # Bandeau d'alerte vif en haut au centre
+        if banner_active:
             banner_w = 260
             bx1 = (w - banner_w) // 2
             bx2 = bx1 + banner_w
@@ -283,5 +331,5 @@ class ColorCardDetector:
             cv2.rectangle(frame, (10, h - 35), (w - 10, h - 8), (20, 20, 20), -1)
             cv2.putText(
                 frame, self.calibration_message, (15, h - 15),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 200), 1, cv2.LINE_AA
+                cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 255, 255), 1, cv2.LINE_AA
             )

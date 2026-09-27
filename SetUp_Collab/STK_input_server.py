@@ -22,28 +22,39 @@ address     = ('localhost', 6006)
 sock        = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.bind(address)
 
+import time
+
+def robust_tap(key_name, hold_seconds=0.06):
+    """Maintient la touche pendant 60 ms pour garantir sa prise en compte par la boucle de jeu STK."""
+    try:
+        keyboard.press(key_name)
+        time.sleep(hold_seconds)
+        keyboard.release(key_name)
+    except Exception as err:
+        print(f"Erreur robust_tap({key_name}): {err}")
+
 #list of tuples: (received command, keyboard key, keyboard func )
 bindings    = [ ['UP', 'up', keyboard.press_and_release],
                 ['DOWN', 'down', keyboard.press_and_release],
                 ['LEFT', 'left', keyboard.press_and_release],
                 ['RIGHT', 'right', keyboard.press_and_release],
-                ['SELECT', 'enter', keyboard.press_and_release],
-                ['CANCEL', 'backspace', keyboard.press_and_release],
-                ['BACK', 'backspace', keyboard.press_and_release],
-                ['FIRE', 'space', keyboard.press_and_release],
+                ['SELECT', 'enter', robust_tap],
+                ['CANCEL', 'backspace', robust_tap],
+                ['BACK', 'backspace', robust_tap],
+                ['FIRE', 'space', robust_tap],
                 ['P_FIRE', 'space', keyboard.press],
                 ['R_FIRE', 'space', keyboard.release],
-                ['NITRO', 'n', keyboard.press_and_release],
+                ['NITRO', 'n', robust_tap],
                 ['P_NITRO', 'n', keyboard.press],
                 ['R_NITRO', 'n', keyboard.release],
                 ['P_SKIDDING', 'v', keyboard.press],
                 ['R_SKIDDING', 'v', keyboard.release],
                 ['P_LOOKBACK', 'b', keyboard.press],
                 ['R_LOOKBACK', 'b', keyboard.release],
-                ['RESCUE', 'backspace', keyboard.press_and_release],
+                ['RESCUE', 'backspace', robust_tap],
                 ['P_RESCUE', 'backspace', keyboard.press],
                 ['R_RESCUE', 'backspace', keyboard.release],
-                ['PAUSE', 'escape', keyboard.press_and_release],
+                ['PAUSE', 'escape', robust_tap],
                 ['P_UP', 'up', keyboard.press],
                 ['R_UP', 'up', keyboard.release],
                 ['P_DOWN', 'down', keyboard.press],
