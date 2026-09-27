@@ -69,6 +69,9 @@ print("OSC connection established to " + address + " on port " + str(port) + "!"
 
 # capture frames from a camera and the time 
 cap = cv2.VideoCapture(0)
+cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 360)
 first_time = time.time()*1000.0
 
 # get image size
@@ -156,14 +159,14 @@ def visualize(
 
     #### Part 2: get the position of the eyes and compute the center of the eyes ####
     # Draw only the keypoints corresponding to the eyes
-  for i in range(2):
-    keypoint = detection.keypoints[i]
-    keypoint_px = _normalized_to_pixel_coordinates(keypoint.x, keypoint.y,
-                                                    width, height)
-    color, thickness, radius = (0, 255, 0), 2, 2
+    for i in range(2):
+      keypoint = detection.keypoints[i]
+      keypoint_px = _normalized_to_pixel_coordinates(keypoint.x, keypoint.y,
+                                                      width, height)
+      color, thickness, radius = (0, 255, 0), 2, 2
 
-    if keypoint_px is not None:
-        cv2.circle(annotated_image, keypoint_px, thickness, color, radius)
+      if keypoint_px is not None:
+          cv2.circle(annotated_image, keypoint_px, thickness, color, radius)
 
 
     # Draw the center of the eyes with a different color
@@ -232,7 +235,6 @@ def runtracking():
     while True:
 
         # add to delay to avoid that the loop run too fast
-        time.sleep(0.05)
 
         # read one frame from a camera and get the frame timestamp
         ret, img_bgr = cap.read()
@@ -240,7 +242,9 @@ def runtracking():
 
         # Convert the opencv image to RGB
         img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-
+        if not ret:
+            continue
+    
         # Convert the frame received from OpenCV to a MediaPipe’s Image object.
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img_rgb) 
 
@@ -262,7 +266,7 @@ def runtracking():
                 
 
             # Get the position of the two eyes in pixels 
-            if len( biggest_face.keypoints) >=2:
+            if len(res.tracking_results.detections) > 0 and len(biggest_face.keypoints) >=1:
                 eye1 = biggest_face.keypoints[0]
                 eye2 = biggest_face.keypoints[1]
 
@@ -302,6 +306,9 @@ def runtracking():
                     											+ "{:.2f}".format(pos_z))
 
                     ################### Part 5: send the head position with OSC ######################
+                    clientOSC.send_message(b'/tracker/eyes1/pos_xyz', [eye1_px[0], eye1_px[1]])
+                    clientOSC.send_message(b'/tracker/eyes2/pos_xyz', [eye2_px[0], eye2_px[1]])
+                    
                     clientOSC.send_message(b'/tracker/head/pos_xyz', [pos_x, pos_y, pos_z])
   
             # Display an image in a window (you can avoid to display the image to improve the performance)
@@ -311,15 +318,15 @@ def runtracking():
             cv2.imshow('img', bgr_annotated_image)
   
         # Wait for Esc key to stop 
-        k = cv2.waitKey(30) & 0xff
+        k = cv2.waitKey(1) & 0xff
         if k == 27: 
                break
   
     # release the video stream from the camera
-    cap.release()
+    #cap.release()
       
     # close the associated window 
-    cv2.destroyAllWindows() 
+    #cv2.destroyAllWindows() 
 
 
 ############################ program execution #############################

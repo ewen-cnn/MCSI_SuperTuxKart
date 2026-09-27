@@ -1,5 +1,6 @@
 ###############################################################################
 ## Global libs
+import math
 import socket
 import sys
 import threading
@@ -7,6 +8,7 @@ import time
 import serial
 import os
 import subprocess
+from serial.tools import list_ports       
 
 from classes.sensorStates import *
 from classes.KartState import *
@@ -15,8 +17,6 @@ from classes.config import *
 from collections import deque
 from STK_Sender import *
 from oscpy.server import OSCThreadServer
-
-
 
 ###############################################################################
 ## Global vars
@@ -40,13 +40,18 @@ SEUIL_CONTRACTION = 40      # a regler apres mesure
 SEUIL_RELACHEMENT = 20      # plus bas que le precedent : hysteresis
 SENSOR_TIMEOUT = 0.50       # sans message d'un capteur -> capteur eteint
 
-DEAD_ZONE_X = 0.20
+ANGLE_TETE_MAX = 20.0      # degres d'inclinaison pour braquer a fond
+EXPO           = 2.0       # 1.0 = lineaire ; 2.0 = doux au centre, franc aux extremes
+INVERT_TETE    = False     # a basculer si le kart tourne a l'envers
+
+DEAD_ZONE_X = 10.0 / ANGLE_TETE_MAX
 DEAD_ZONE_Y = 0.20
-DEAD_ZONE_Z = 50
+DEAD_ZONE_Z = 0.25
 
 POS_X_MIN, POS_X_MAX = -23.0 , 23.0
+POS_Y_MIN, POS_Y_MAX = -23.0 , 23.0
+POS_Z_MIN, POS_Z_MAX = 80.0, 100.0    # cm : a mesurer avec --calib
 
-CONTINUOUS_PERIOD = 0.05   # duree d'un cycle pressed + released (s)
 SKID_KICKOFF = 0.15 
 SKID_INTO_MAX = 0.7     # braquage maxi DANS le sens du virage pendant la glisse
 LOOP_HZ = 120      
@@ -59,12 +64,14 @@ def main():
     gyr = Vector3State()
     shake_detector = ShakeDetector()
     camera = CameraState()
+    eye1 = EyesValues()
+    eye2 = EyesValues()
     osc = OSCThreadServer()
     steering_pwm = ContinuousCommand()
     
     osc.listen(address=OSC_LISTEN_IP, port=OSC_LISTEN_PORT, default=True)
 
-    bind_all(osc, gyr, camera)
+    bind_all(osc, gyr, eye1, eye2, camera)
     print()
     print('STK client v2 started ', end='')
 
@@ -79,85 +86,112 @@ def main():
         cwd=ici, creationflags=subprocess.CREATE_NEW_CONSOLE)
     
     muscle_contracte = False
+    angle_repos = None          # neutre mesure au demarrage
+    debut_calib = None
+    echantillons = []
     nitro_jusqua = None
     skid_started_at = 0.0
     skid_direction = 'NONE'
 
-    with serial.Serial(SERIAL_PORT, BAUDRATE, timeout=0.01) as serialPort:
-        serialPort.reset_input_buffer()
-        print("Lecture de", SERIAL_PORT)
+    # --- Port serie : optionnel ---
+    serialPort = None
+    port_detecte = None
+    for p in list_ports.comports():
+        if p.vid == 0x2341:                 # identifiant fabricant Arduino
+            port_detecte = p.device
+            break
 
+    if port_detecte is None:
+        print(YELLOW + "Aucune carte Arduino detectee : on continue sans." + WHITE)
+    else:
         try:
-            while True:
-                now = time.time()
-                
-                # Direction du kart
-                cx, cy, cz, gage = camera.snapshot()
-            
-                nx = normalize(cx, POS_X_MIN, POS_X_MAX)
+            serialPort = serial.Serial(port_detecte, BAUDRATE, timeout=0.01)
+            serialPort.reset_input_buffer()
+            print("Lecture de", port_detecte)
+        except serial.SerialException as e:
+            print(YELLOW + "Port {} inutilisable ({}) : on continue sans.".format(
+                port_detecte, e) + WHITE)
+            serialPort = None
+    ############# DEBUT DE LA BOUCLE ##################    
+    try:
+        while True:
+            now = time.time()
 
-                                # --- La direction est dosee, pas tout ou rien ---------
-                direction = zone(-nx, DEAD_ZONE_X, 'LEFT', 'RIGHT')
-               # niveau = intensity(nx, DEAD_ZONE_X)
+            # --- 1. Ce qui ne depend pas du port serie ----------------
+            if nitro_jusqua and now >= nitro_jusqua:
+                kart.set_nitro(False)
+                nitro_jusqua = None
 
-                
-                if direction == 'LEFT':
-                    kart.set_throttle('ACCELERATE')
-                    kart.set_steering(direction)
+            gx, gy, gz, gage = gyr.snapshot()
+            if gx is not None and gage <= SENSOR_TIMEOUT:
+                if shake_detector.updategyr(gx, now):
+                    kart.rescue()
 
-                elif direction == 'RIGHT':
-                    kart.set_throttle('ACCELERATE')
-                    kart.set_steering(direction)
+            # --- 2. Direction : angle de la droite entre les deux yeux --
+            e_x1, e_y1, age1 = eye1.snapshot()
+            e_x2, e_y2, age2 = eye2.snapshot()
+            yeux_ok = (e_x1 is not None and e_x2 is not None
+                        and max(age1, age2) <= SENSOR_TIMEOUT)
 
+            if yeux_ok:
+                angle = math.degrees(math.atan2(e_y2 - e_y1, e_x2 - e_x1))
+                if INVERT_TETE:
+                    angle = -angle
+                if angle_repos is None:
+                    # Calibration : 2 s de tete immobile pour mesurer le neutre.
+                    if debut_calib is None:
+                        debut_calib = now
+                        print("Calibration : garde la tete droite 2 secondes...")
+                    echantillons.append(angle)
+                    if now - debut_calib >= 2.0 and echantillons:
+                        angle_repos = sum(echantillons) / len(echantillons)
+                        print("Angle de repos : {:+.1f} deg".format(angle_repos))
+                    kart.set_steering('NONE')
                 else:
-                    None
-
-                ligne = serialPort.readline()
-                if not ligne.endswith(b'\n'):
-                    continue
-
-                nom = ligne.decode('utf-8', errors='replace').strip()
-
-                if nom == 'vibrationSensor':
-                    kart.set_nitro(True)
-                    nitro_jusqua = time.time() + 0.15      # impulsion
-
-                elif nom == 'Contraction':
-                    if not muscle_contracte:
-                        muscle_contracte = True
-                        kart.set_skidding(True)
-                    elif muscle_contracte:
-                        muscle_contracte = False
-                        kart.set_skidding(False)
-
-                skid = muscle_contracte and nx > 0.25
-                if skid and not kart.skidding_on:
-                    skid_started_at = now
-                    
-                # Fin de l'impulsion nitro
-                if nitro_jusqua and now >= nitro_jusqua:
-                    kart.set_nitro(False)
-                    nitro_jusqua = None                
-
-                # Secousse du telephone -> sauvetage, evaluee a CHAQUE tour
-                gx, gy, gz, gage = gyr.snapshot()
-                if gx is not None and gage <= SENSOR_TIMEOUT:
-                    if shake_detector.updategyr(gx, now):
-                        kart.rescue()
-
-                kart.set_throttle(zone(cz, DEAD_ZONE_Z, 'BRAKE', 'ACCELERATE'))
+                    nx = normalize(angle - angle_repos, -ANGLE_TETE_MAX, ANGLE_TETE_MAX)
+                    direction = zone(-nx, DEAD_ZONE_X, 'LEFT', 'RIGHT')
+                    niveau = intensity(-nx, DEAD_ZONE_X) ** EXPO
+                    if steering_pwm.pressed(niveau, now):
+                        kart.set_steering(direction)
+                    else:
+                        kart.set_steering('NONE')
+            else:
+                kart.set_steering('NONE')      # visage perdu : on relache
                 
-                time.sleep(1 / 120)
+            # --- 3. Traction : distance de la tete a la camera ---------
+            cx, cy, cz, cage = camera.snapshot()
+            if cz is not None and cage <= SENSOR_TIMEOUT:
+                nz = normalize(cz, POS_Z_MIN, POS_Z_MAX)
+                # se rapprocher (cz petit) -> nz vaut -1 -> on accelere
+                kart.set_throttle(zone(-nz, DEAD_ZONE_Z, 'BRAKE', 'ACCELERATE'))
+            else:
+                kart.set_throttle('NONE')
 
-        except KeyboardInterrupt:
-            pass
-        finally:
-            kart.release_all()
-            osc.stop()
-            serveur.terminate()         
-            tracking.terminate()
-            print()
-            print('STK collab input stopped')
+            # --- 4. Lignes de l'Arduino, sans bloquer le reste ---------
+            if serialPort is not None:
+                ligne = serialPort.readline()
+                if ligne.endswith(b'\n'):
+                    nom = ligne.decode('utf-8', errors='replace').strip()
+                    if nom == 'vibrationSensor':
+                        kart.set_nitro(True)
+                        nitro_jusqua = now + 0.15
+                    elif nom == 'Contraction':
+                        muscle_contracte = not muscle_contracte
+                        kart.set_skidding(muscle_contracte)
+
+            time.sleep(1.0 / LOOP_HZ)
+
+    except KeyboardInterrupt:
+        pass
+    finally:
+        kart.release_all()
+        osc.stop()
+        if serialPort is not None:
+            serialPort.close()
+        serveur.terminate()
+        tracking.terminate()
+        print()
+        print('STK collab input stopped')
 
 if __name__ == '__main__':
     main()

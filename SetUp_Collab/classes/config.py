@@ -40,13 +40,19 @@ def gravity_deviation(ax, ay, az):
     return abs(math.sqrt(ax * ax + ay * ay + az * az) - GRAVITY)
 
 
-def bind_all(osc, gyr, camera):
+def bind_all(osc, gyr, eye1, eye2, camera):
     """Associe les messages OSC de MultiSense Osc aux trois etats."""
 
     osc.bind(b'/multisense/gyroscope/x', lambda *values: gyr.set_x(values[0]))
     osc.bind(b'/multisense/gyroscope/y', lambda *values: gyr.set_y(values[0]))
     osc.bind(b'/multisense/gyroscope/z', lambda *values: gyr.set_z(values[0]))
 
+    osc.bind(b'/tracker/eyes1/pos_xyz', lambda *values: eye1.pos_x(values[0]))
+    osc.bind(b'/tracker/eyes1/pos_xyz', lambda *values: eye1.pos_y(values[1]))
+    osc.bind(b'/tracker/eyes2/pos_xyz', lambda *values: eye2.pos_x(values[0]))
+    osc.bind(b'/tracker/eyes2/pos_xyz', lambda *values: eye2.pos_y(values[1]))
+
+
     osc.bind(b'/tracker/head/pos_xyz', lambda *values: camera.pos_x(values[0]))
     osc.bind(b'/tracker/head/pos_xyz', lambda *values: camera.pos_y(values[1]))     
-    osc.bind(b'/tracker/head/pos_xyz', lambda *values: camera.pos_z(values[2]))  # age is not used, but we can bind it if needed
+    osc.bind(b'/tracker/head/pos_xyz', lambda *values: camera.pos_z(values[2]))  
