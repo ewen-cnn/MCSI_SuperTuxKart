@@ -5,6 +5,8 @@
 ## Global libs
 import sys
 import socket
+import threading
+import time
 import keyboard
 
 ###############################################################################
@@ -22,16 +24,18 @@ address     = ('localhost', 6006)
 sock        = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.bind(address)
 
-import time
-
-def robust_tap(key_name, hold_seconds=0.06):
-    """Maintient la touche pendant 60 ms pour garantir sa prise en compte par la boucle de jeu STK."""
+def _hold_and_release(key_name, hold_seconds):
     try:
         keyboard.press(key_name)
         time.sleep(hold_seconds)
         keyboard.release(key_name)
     except Exception as err:
         print(f"Erreur robust_tap({key_name}): {err}")
+
+def robust_tap(key_name, hold_seconds=0.06):
+    """Maintient la touche pendant 60 ms dans un thread pour garantir sa prise en compte sans bloquer le serveur."""
+    t = threading.Thread(target=_hold_and_release, args=(key_name, hold_seconds), daemon=True)
+    t.start()
 
 #list of tuples: (received command, keyboard key, keyboard func )
 bindings    = [ ['UP', 'up', keyboard.press_and_release],
