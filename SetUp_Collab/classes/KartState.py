@@ -44,23 +44,10 @@ class KartState:
     def set_throttle(self, target):
         self.throttle = self._switch(self.THROTTLE_COMMANDS, self.throttle, target)
 
-    def set_analog_steering(self, value: float):
-        """Definit la consigne analogique de direction [-1.0 (gauche) .. +1.0 (droite)]."""
-        clamped = max(-1.0, min(1.0, float(value)))
-        self.sender.send(f"STEER {clamped:.3f}")
-
-    def set_analog_throttle(self, value: float):
-        """Definit la consigne analogique de traction [-1.0 (frein) .. +1.0 (accel)]."""
-        clamped = max(-1.0, min(1.0, float(value)))
-        self.sender.send(f"THROTTLE {clamped:.3f}")
-
     def release_all(self):
         """Retour au point neutre : roues droites, ni accelerateur ni frein."""
         self.set_steering('NONE')
         self.set_throttle('NONE')
-        self.set_skidding(False)
-        self.sender.send("STEER 0.0")
-        self.sender.send("THROTTLE 0.0")
 
     # --- Actions ponctuelles (le serveur fait press_and_release) -------------
     def fire(self):

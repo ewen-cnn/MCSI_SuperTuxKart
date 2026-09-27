@@ -67,16 +67,11 @@ def main():
         default=COLOR_PRESET,
         help="Couleur de l'objet/carte pour lancer les objets ('FIRE') (defaut: red, ou 'off' pour desactiver)",
     )
-    parser.add_argument(
-        '-j', '--joystick', action='store_true',
-        help="Activer la direction et l'acceleration analogiques fluides (mode Joystick virtuel)",
-    )
     args = parser.parse_args()
     debug = args.debug
     steering_mode = args.steering
     play_mode = args.mode
     color_mode = args.color
-    use_joystick = args.joystick
 
     sender = STKSender(STK_SERVER_ADDRESS, debug=debug)
     kart = KartState(sender, debug=debug)
@@ -109,8 +104,7 @@ def main():
     )
     print()
     color_tag = f", Objet: {color_mode.upper()}" if color_mode != "off" else ""
-    joy_tag = ", Joystick: ON" if use_joystick else ""
-    print(f'STK client v2 started (Mode jeu: {play_mode.upper()}, Direction: {steering_mode.upper()}{color_tag}{joy_tag})')
+    print(f'STK client v2 started (Mode jeu: {play_mode.upper()}, Direction: {steering_mode.upper()}{color_tag})')
 
     # Lance le serveur et le face tracking avec compatibilite multi-plateforme.
     ici = os.path.dirname(os.path.abspath(__file__))
@@ -132,8 +126,6 @@ def main():
         cmd_serveur = [sys.executable, os.path.join(ici, 'STK_input_server.py')]
         if debug:
             cmd_serveur.append('-d')
-        if use_joystick:
-            cmd_serveur.append('-j')
         serveur = subprocess.Popen(cmd_serveur, cwd=ici, **extra_flags)
         time.sleep(1.0)          # laisse le serveur prendre le port 6006
     else:
@@ -230,33 +222,17 @@ def main():
                         if now - debut_calib >= 2.0 and echantillons:
                             angle_repos = sum(echantillons) / len(echantillons)
                             print("Angle de repos calibre : {:+.1f} deg".format(angle_repos))
-                        if use_joystick:
-                            kart.set_analog_steering(0.0)
-                        else:
-                            kart.set_steering('NONE')
+                        kart.set_steering('NONE')
                     else:
                         nx = normalize(angle - angle_repos, -ANGLE_TETE_MAX, ANGLE_TETE_MAX)
-                        if use_joystick:
-                            delta_deg = angle - angle_repos
-                            if abs(delta_deg) <= DEAD_ZONE_ANGLE_DEG:
-                                steer_analog = 0.0
-                            else:
-                                mag = (abs(delta_deg) - DEAD_ZONE_ANGLE_DEG) / max(1e-4, ANGLE_TETE_MAX - DEAD_ZONE_ANGLE_DEG)
-                                mag = min(1.0, max(0.0, mag)) ** EXPO
-                                steer_analog = mag if delta_deg > 0 else -mag
-                            kart.set_analog_steering(steer_analog)
+                        direction = zone(nx, DEAD_ZONE_X_FACE, 'LEFT', 'RIGHT')
+                        niveau = intensity(nx, DEAD_ZONE_X_FACE) ** EXPO
+                        if steering_pwm.pressed(niveau, now):
+                            kart.set_steering(direction)
                         else:
-                            direction = zone(nx, DEAD_ZONE_X_FACE, 'LEFT', 'RIGHT')
-                            niveau = intensity(nx, DEAD_ZONE_X_FACE) ** EXPO
-                            if steering_pwm.pressed(niveau, now):
-                                kart.set_steering(direction)
-                            else:
-                                kart.set_steering('NONE')
+                            kart.set_steering('NONE')
                 else:
-                    if use_joystick:
-                        kart.set_analog_steering(0.0)
-                    else:
-                        kart.set_steering('NONE')      # visage perdu : on relache
+                    kart.set_steering('NONE')      # visage perdu : on relache
             else:
                 # Mode position : deplacement horizontal du visage par rapport aux lignes de seuils
                 if is_duo_actif:
@@ -282,38 +258,24 @@ def main():
                     head_x = (FRAME_WIDTH / 2.0) + (c_x * 654.0 / c_z)
 
                 if head_x is not None:
-                    if use_joystick:
-                        if head_x < left_thresh_px:
-                            delta = left_thresh_px - head_x
-                            steer_analog = -min(1.0, max(0.0, delta / max(1.0, TURN_SPAN_PX))) ** EXPO
-                        elif head_x > right_thresh_px:
-                            delta = head_x - right_thresh_px
-                            steer_analog = min(1.0, max(0.0, delta / max(1.0, TURN_SPAN_PX))) ** EXPO
-                        else:
-                            steer_analog = 0.0
-                        kart.set_analog_steering(steer_analog)
-                    else:
-                        if head_x < left_thresh_px:
-                            delta = left_thresh_px - head_x
-                            niveau = min(1.0, max(0.0, delta / max(1.0, TURN_SPAN_PX))) ** EXPO
-                            if steering_pwm.pressed(niveau, now):
-                                kart.set_steering('LEFT')
-                            else:
-                                kart.set_steering('NONE')
-                        elif head_x > right_thresh_px:
-                            delta = head_x - right_thresh_px
-                            niveau = min(1.0, max(0.0, delta / max(1.0, TURN_SPAN_PX))) ** EXPO
-                            if steering_pwm.pressed(niveau, now):
-                                kart.set_steering('RIGHT')
-                            else:
-                                kart.set_steering('NONE')
+                    if head_x < left_thresh_px:
+                        delta = left_thresh_px - head_x
+                        niveau = min(1.0, max(0.0, delta / max(1.0, TURN_SPAN_PX))) ** EXPO
+                        if steering_pwm.pressed(niveau, now):
+                            kart.set_steering('LEFT')
                         else:
                             kart.set_steering('NONE')
-                else:
-                    if use_joystick:
-                        kart.set_analog_steering(0.0)
+                    elif head_x > right_thresh_px:
+                        delta = head_x - right_thresh_px
+                        niveau = min(1.0, max(0.0, delta / max(1.0, TURN_SPAN_PX))) ** EXPO
+                        if steering_pwm.pressed(niveau, now):
+                            kart.set_steering('RIGHT')
+                        else:
+                            kart.set_steering('NONE')
                     else:
                         kart.set_steering('NONE')
+                else:
+                    kart.set_steering('NONE')
                 
             # --- 4. Traction : Joueur 2 en Duo, ou Joueur Solo --------------
             if is_duo_actif and p2_cz is not None and p2_cage <= SENSOR_TIMEOUT:
@@ -323,27 +285,11 @@ def main():
                 cx, cy, cz, cage = camera.snapshot()
 
             if cz is not None and cage <= SENSOR_TIMEOUT:
-                if use_joystick:
-                    # Traction analogique progressive :
-                    # cz < POS_Z_MIN -> acceleration (0.0 a 1.0)
-                    # cz > POS_Z_MAX -> freinage (0.0 a -1.0)
-                    if cz < POS_Z_MIN:
-                        accel_amount = min(1.0, max(0.0, (POS_Z_MIN - cz) / 15.0))
-                        kart.set_analog_throttle(accel_amount)
-                    elif cz > POS_Z_MAX:
-                        brake_amount = min(1.0, max(0.0, (cz - POS_Z_MAX) / 15.0))
-                        kart.set_analog_throttle(-brake_amount)
-                    else:
-                        kart.set_analog_throttle(0.0)
-                else:
-                    nz = normalize(cz, POS_Z_MIN, POS_Z_MAX)
-                    # se rapprocher (cz petit) -> nz vaut -1 -> on accelere
-                    kart.set_throttle(zone(-nz, DEAD_ZONE_Z, 'BRAKE', 'ACCELERATE'))
+                nz = normalize(cz, POS_Z_MIN, POS_Z_MAX)
+                # se rapprocher (cz petit) -> nz vaut -1 -> on accelere
+                kart.set_throttle(zone(-nz, DEAD_ZONE_Z, 'BRAKE', 'ACCELERATE'))
             else:
-                if use_joystick:
-                    kart.set_analog_throttle(0.0)
-                else:
-                    kart.set_throttle('NONE')
+                kart.set_throttle('NONE')
 
             # --- 4. Lignes de l'Arduino, sans bloquer le reste ---------
             if serialPort is not None:
