@@ -60,12 +60,13 @@ DUO_P1_LEFT_THRESHOLD = 0.19
 DUO_P1_RIGHT_THRESHOLD = 0.31
 
 # --- 2. Traction (Acceleration & Freinage) ---
-# cz est la distance en cm entre le visage et la camera
-POS_Z_MIN = 70.0             # Distance cm penche en avant (acceleration max)
-POS_Z_MAX = 105.0            # Distance cm penche en arriere (freinage)
-DEAD_ZONE_Z = 0.20           # Zone morte autour du point de repos
-
-
+# Distance en cm entre le visage et la camera
+DEFAULT_Z_NEUTRAL = 75.0         # Distance neutre initiale (calibrable en jeu via la touche Z)
+DEAD_ZONE_Z_CM = 7.0            # Zone morte neutre (+/- 7 cm autour de la position de repos)
+DELTA_Z_MAX = 20.0              # Ecart en cm pour pleine acceleration / plein freinage
+POS_Z_MIN = 60.0                # Seuil absolu min secours (cm)
+POS_Z_MAX = 110.0               # Seuil absolu max secours (cm)
+DEAD_ZONE_Z = 0.20              # Zone morte normalisee
 
 # --- 3. Detection d'Objets Colores (Lancer d'objets / Fire) ---
 COLOR_DETECTION_ENABLED = True
@@ -83,9 +84,9 @@ COLOR_MIN_SOLIDITY = 0.65       # Compacite contour/enveloppe convexe (rejette f
 COLOR_MIN_EXTENT = 0.35         # Remplissage par rapport au rectangle englobant
 
 # Filtrage temporel & Anti-rebond (Debounce)
-COLOR_COOLDOWN_SECONDS = 1.2    # Temps d'attente mini entre 2 tirs consecutifs (en secondes)
-COLOR_PULSE_DURATION = 0.20     # Duree d'activation de l'impulsion OSC FIRE (en secondes)
-COLOR_CONFIRM_FRAMES = 2        # Nombre d'images consecutives requises pour valider la detection
+COLOR_COOLDOWN_SECONDS = 1.6    # Delai anti-rafale entre deux tirs d'objets (1.6 secondes)
+COLOR_PULSE_DURATION = 0.40     # Duree d'affichage visuel de la banniere FIRE (en secondes)
+COLOR_CONFIRM_FRAMES = 3        # Nombre d'images consecutives requises pour valider la detection
 
 
 
@@ -109,6 +110,7 @@ def bind_all(
     p1_camera=None,
     p2_camera=None,
     fire_trigger=None,
+    z_neutral=None,
 ):
     """Associe les messages OSC aux capteurs (compatible solo et duo)."""
 
@@ -148,5 +150,9 @@ def bind_all(
     # Message de lancer d'objet (FIRE) par detection de carte/couleur
     if fire_trigger is not None:
         osc.bind(b'/tracker/fire', lambda *values: fire_trigger.trigger(values[0] if values else 1))
+
+    # Message de distance neutre calibree
+    if z_neutral is not None:
+        osc.bind(b'/tracker/z_neutral', lambda *values: z_neutral.update(values[0] if values else DEFAULT_Z_NEUTRAL))
 
   
