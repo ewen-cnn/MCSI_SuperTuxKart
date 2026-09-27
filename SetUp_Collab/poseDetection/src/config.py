@@ -83,7 +83,7 @@ class GestureConfig:
 class ColorConfig:
     enabled: bool = True  # Set to False to disable card detection and all card overlays
     show_reticle: bool = False  # Set to False to hide the center 'HOLD CARD' reticle box
-    preset: str = "orange"
+    preset: str = "green"
     lower_hsv: Tuple[int, int, int] = (40, 80, 60)
     upper_hsv: Tuple[int, int, int] = (82, 255, 255)
     min_area: int = 180
