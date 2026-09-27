@@ -34,6 +34,7 @@ from mediapipe.tasks.python import vision
 
 # Import project configuration parameters
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from classes.colorDetector import ColorCardDetector
 from classes.config import (
     FRAME_WIDTH,
     FRAME_HEIGHT,
@@ -45,6 +46,16 @@ from classes.config import (
     SOLO_RIGHT_THRESHOLD,
     DUO_P1_LEFT_THRESHOLD,
     DUO_P1_RIGHT_THRESHOLD,
+    COLOR_DETECTION_ENABLED,
+    COLOR_PRESET,
+    COLOR_MIN_AREA,
+    COLOR_MAX_AREA,
+    COLOR_MAX_ASPECT_RATIO,
+    COLOR_MIN_SOLIDITY,
+    COLOR_MIN_EXTENT,
+    COLOR_COOLDOWN_SECONDS,
+    COLOR_PULSE_DURATION,
+    COLOR_CONFIRM_FRAMES,
 )
 
 # Focal length in pixels
@@ -75,6 +86,24 @@ def parse_arguments():
         choices=["face", "position"],
         default="face",
         help="Mode de direction: 'face' (inclinaison tete) ou 'position' (position horizontale cx avec lignes de seuil)",
+    )
+    parser.add_argument(
+        "--color",
+        choices=["red", "green", "blue", "yellow", "orange", "custom", "off"],
+        default=COLOR_PRESET,
+        help="Couleur de l'objet/carte pour lancer les objets ('FIRE') (defaut: red, ou 'off' pour desactiver)",
+    )
+    parser.add_argument(
+        "--color-min-area",
+        type=int,
+        default=COLOR_MIN_AREA,
+        help=f"Superficie minimale en pixels pour la detection de couleur (defaut: {COLOR_MIN_AREA})",
+    )
+    parser.add_argument(
+        "--color-cooldown",
+        type=float,
+        default=COLOR_COOLDOWN_SECONDS,
+        help=f"Delai minimal en secondes entre 2 lancers d'objets (defaut: {COLOR_COOLDOWN_SECONDS}s)",
     )
     parser.add_argument("--port", type=int, default=8000, help="Port OSC de streaming (defaut: 8000)")
     parser.add_argument("--host", type=str, default="localhost", help="Hote OSC (defaut: localhost)")
@@ -181,6 +210,10 @@ def draw_hud(
     active_mode: str,
     fps: float,
     steering_mode: str = "face",
+    color_detector: Optional[ColorCardDetector] = None,
+    card_triggered: bool = False,
+    card_detected: bool = False,
+    card_bbox: Optional[Tuple[int, int, int, int]] = None,
 ):
     """Dessine le HUD moderne en miroir avec zone de direction (P1) et zone de traction (P2)."""
     h, w, _ = frame.shape
@@ -316,13 +349,20 @@ def draw_hud(
         cv2.putText(frame, spd_lbl, (p1.origin_x, p1.origin_y + p1.height + 36),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, spd_clr, 2, cv2.LINE_AA)
 
-    # 6. Barre d'aide inferieure
+    # 6. Detection d'objet colore (FIRE)
+    if color_detector and color_detector.enabled:
+        color_detector.draw_hud_overlay(frame, card_triggered, card_detected, card_bbox)
+
+    # 7. Barre d'aide inferieure
+    steer_help = "Position" if steering_mode == "position" else "Inclinaison"
+    col_str = f" | Objet [{color_detector.preset.upper()}]: FIRE (C: Calib)" if (color_detector and color_detector.enabled) else ""
+    help_text = f"ESC: Quitter | Steer: {steer_help} | Z: Vitesse{col_str}"
     cv2.putText(
         frame,
-        "ESC: Quitter | Incliner tete: Tourner | Avancer/Reculer: Vitesse",
+        help_text,
         (15, h - 10),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.36,
+        0.35,
         (160, 160, 160),
         1,
         cv2.LINE_AA,
@@ -338,9 +378,24 @@ def runtracking():
     osc_port = args.port
     no_gui = args.no_gui
 
+    color_enabled = (args.color != "off" and COLOR_DETECTION_ENABLED)
+    color_detector = ColorCardDetector(
+        enabled=color_enabled,
+        preset=args.color,
+        min_area=args.color_min_area,
+        max_area=COLOR_MAX_AREA,
+        max_aspect_ratio=COLOR_MAX_ASPECT_RATIO,
+        min_solidity=COLOR_MIN_SOLIDITY,
+        min_extent=COLOR_MIN_EXTENT,
+        cooldown_seconds=args.color_cooldown,
+        pulse_duration=COLOR_PULSE_DURATION,
+        confirm_frames=COLOR_CONFIRM_FRAMES,
+    )
+
     print("\n" + "=" * 65)
     print("  MCSI SuperTuxKart - Face Tracking Collaboratif & Solo")
-    print(f"  Mode configure : {mode.upper()} | Direction : {steering_mode.upper()}")
+    color_str = f"{args.color.upper()} (Tir actif)" if color_enabled else "DESACTIVE"
+    print(f"  Mode configure : {mode.upper()} | Direction : {steering_mode.upper()} | Objet : {color_str}")
     print(f"  Distance interpupillaire : {user_ipd * 2.0:.1f} cm (demi-ecart: {user_ipd} cm)")
     print(f"  Streaming OSC vers {osc_host}:{osc_port}")
     print("=" * 65 + "\n")
@@ -389,6 +444,11 @@ def runtracking():
             prev_time = now
             if dt > 0:
                 fps = 0.9 * fps + 0.1 * (1.0 / dt)
+
+            # Detection d'objet colore pour lancer un objet (FIRE)
+            card_triggered, card_detected, card_bbox, card_color = color_detector.detect(img_bgr, now)
+            if card_triggered:
+                clientOSC.send_message(b"/tracker/fire", [1])
 
             frame_timestamp_ms = int(now * 1000 - first_time)
 
@@ -454,12 +514,26 @@ def runtracking():
 
             # Affichage graphique
             if not no_gui:
-                draw_hud(img_bgr, p1, p2, active_mode, fps, steering_mode=steering_mode)
+                draw_hud(
+                    img_bgr,
+                    p1,
+                    p2,
+                    active_mode,
+                    fps,
+                    steering_mode=steering_mode,
+                    color_detector=color_detector,
+                    card_triggered=card_triggered,
+                    card_detected=card_detected,
+                    card_bbox=card_bbox,
+                )
                 cv2.imshow("SuperTuxKart - Face Tracking Collaboratif", img_bgr)
 
                 key = cv2.waitKey(1) & 0xFF
                 if key == 27:  # ESC
                     break
+                elif (key == ord('c') or key == ord('C')) and color_detector.enabled:
+                    ok, msg = color_detector.sample_from_center(img_bgr)
+                    print(f"\n[Calibration Couleur] {msg}")
 
     except KeyboardInterrupt:
         pass

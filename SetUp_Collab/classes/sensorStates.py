@@ -84,3 +84,26 @@ class EyesValues():
             if self._x is None or self._y is None:
                 return None, None, float('inf')
             return self._x, self._y, time.time() - self._last_update
+
+
+class TriggerState:
+    """Stocke et consomme des evenements ponctuels (ex: lancer d'objet / FIRE)."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._triggered = False
+        self._last_update = 0.0
+
+    def trigger(self, value=1):
+        with self._lock:
+            if value:
+                self._triggered = True
+                self._last_update = time.time()
+
+    def consume(self) -> bool:
+        """Consomme l'evenement : renvoie True une seule fois puis se remet a False."""
+        with self._lock:
+            was = self._triggered
+            self._triggered = False
+            return was
+
