@@ -4,24 +4,24 @@
 #                                                                                    #
 # The script then streams the 3D position through OSC                                #
 #                                                                                    #
-# date: December 2019                                                                #
-# authors: Cedric Fleury                                                             #
+# date: December 2019 / Updated September 2026 for Collaborative STK                 #
+# authors: Cedric Fleury / MCSI SuperTuxKart Collab Team                             #
 # affiliation: IMT Atlantique, Lab-STICC (Brest)                                     #
 #                                                                                    #
-# usage: python tracking.py x                                                        #
-# where x is an optional value to tune the interpupillary distance of the            #
+# usage: python face_tracking.py [--mode {auto,duo,solo}] [ipd]                      #
+# where ipd is an optional value to tune the interpupillary distance of the          #
 # tracked subject (by default, the interpupillary distance is set at 6cm).           #
 ######################################################################################
 
-# import necessary modules
 import sys
+import os
 import time
 import math
-import threading 
+import argparse
 import numpy as np
-from typing import Tuple, Union
+from typing import Tuple, Union, Optional, List
 
-# import oscpy for OSC streaming (https://pypi.org/project/ocspy/)
+# import oscpy for OSC streaming
 from oscpy.client import OSCClient
 
 # import opencv for image processing
@@ -32,303 +32,516 @@ import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
+# Import project configuration parameters
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from classes.colorDetector import ColorCardDetector
+from classes.config import (
+    FRAME_WIDTH,
+    FRAME_HEIGHT,
+    ANGLE_TETE_MAX,
+    DEAD_ZONE_ANGLE_DEG,
+    POS_Z_MIN,
+    POS_Z_MAX,
+    SOLO_LEFT_THRESHOLD,
+    SOLO_RIGHT_THRESHOLD,
+    DUO_P1_LEFT_THRESHOLD,
+    DUO_P1_RIGHT_THRESHOLD,
+    COLOR_DETECTION_ENABLED,
+    COLOR_PRESET,
+    COLOR_MIN_AREA,
+    COLOR_MAX_AREA,
+    COLOR_MAX_ASPECT_RATIO,
+    COLOR_MIN_SOLIDITY,
+    COLOR_MIN_EXTENT,
+    COLOR_COOLDOWN_SECONDS,
+    COLOR_PULSE_DURATION,
+    COLOR_CONFIRM_FRAMES,
+)
 
-########## Part 3: compute the focal length of the webcam ###########
-
-# define the camera focal length in pixels
-# Use the calbirate.py script to determine it!
+# Focal length in pixels
 fl = 654.0
 
-
-################## Part 4: compute the 3D position ##################
-
-# define the height of your screen in cm
-screen_heigth = 21.0 
-
-# define the default interpupillary distance
-user_ipd = 3
-
-# Set interpupillary distance from the command parameter
-if len(sys.argv) >= 2:
-    user_ipd = float(sys.argv[1])
-
-print("Tracking initialized with an interpupillary distance of " + str(user_ipd) + " cm")
+# Screen height in cm
+screen_height = 21.0
 
 
 
-
-# define address and port for streaming
-address = 'localhost'
-port = 8000
-
-clientOSC = OSCClient(address, port)
-print("OSC connection established to " + address + " on port " + str(port) + "!")
-
-
-
-
-# capture frames from a camera and the time 
-cap = cv2.VideoCapture(0)
-cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 360)
-first_time = time.time()*1000.0
-
-# get image size
-frame_width  = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
-frame_height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
-print("Video size: " + str(frame_width) + " x " + str(frame_height))
-
-
-################# Part 1: understand how the face dectector works #################
-
-# Create a new class for retrieving and storing the tracking results
-class TrackingResults:
-    tracking_results = None
-    def get_result(self, result: vision.FaceDetectorResult, output_image: mp.Image, timestamp_ms: int):
-            self.tracking_results = result
-    
-res = TrackingResults()
-
-# Create a face detector instance with the live stream mode:
-base_options = python.BaseOptions(model_asset_path='blaze_face_short_range.tflite')
-options = vision.FaceDetectorOptions(
-    base_options=base_options,
-    running_mode=vision.RunningMode.LIVE_STREAM,
-    result_callback=res.get_result)
-detector = vision.FaceDetector.create_from_options(options)
-
-
-#### visualization fonctions ####
-
-MARGIN = 10  # pixels
-ROW_SIZE = 10  # pixels
-FONT_SIZE = 1
-FONT_THICKNESS = 2
-TEXT_COLOR = (255, 0, 0)  # red
-
-def _normalized_to_pixel_coordinates(
-    normalized_x: float, normalized_y: float, image_width: int,
-    image_height: int) -> Union[None, Tuple[int, int]]:
-  """Converts normalized value pair to pixel coordinates."""
-
-  # Checks if the float value is between 0 and 1.
-  def is_valid_normalized_value(value: float) -> bool:
-    return (value > 0 or math.isclose(0, value)) and (value < 1 or
-                                                      math.isclose(1, value))
-
-  if not (is_valid_normalized_value(normalized_x) and
-          is_valid_normalized_value(normalized_y)):
-    # TODO: Draw coordinates even if it's outside of the image bounds.
-    return None
-  x_px = min(math.floor(normalized_x * image_width), image_width - 1)
-  y_px = min(math.floor(normalized_y * image_height), image_height - 1)
-  return x_px, y_px
-
-def visualize(
-    image,
-    detection_result
-) -> np.ndarray:
-  """Draws bounding boxes and keypoints on the input image and return it.
-  Args:
-    image: The input RGB image.
-    detection_result: The list of all "Detection" entities to be visualize.
-  Returns:
-    Image with bounding boxes.
-  """
-  annotated_image = image.copy()
-  height, width, _ = image.shape
-
-
-  for detection in detection_result.detections:
-    # Draw bounding_box
-    bbox = detection.bounding_box
-    start_point = bbox.origin_x, bbox.origin_y
-    end_point = bbox.origin_x + bbox.width, bbox.origin_y + bbox.height
-    cv2.rectangle(annotated_image, start_point, end_point, TEXT_COLOR, 3)
+def parse_arguments():
+    parser = argparse.ArgumentParser(description="3D Multi-Face Tracking & STK Controller")
+    parser.add_argument(
+        "ipd",
+        nargs="?",
+        type=float,
+        default=3.0,
+        help="Demi-distance interpupillaire en cm (defaut: 3.0 cm, soit 6 cm au total)",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["auto", "duo", "solo"],
+        default="auto",
+        help="Mode de suivi: 'auto' (adapte 1 ou 2 visages), 'duo' (P1 tourne, P2 accelere), 'solo' (1 joueur fait tout)",
+    )
+    parser.add_argument(
+        "--steering",
+        choices=["face", "position"],
+        default="face",
+        help="Mode de direction: 'face' (inclinaison tete) ou 'position' (position horizontale cx avec lignes de seuil)",
+    )
+    parser.add_argument(
+        "--color",
+        choices=["red", "green", "blue", "yellow", "orange", "custom", "off"],
+        default=COLOR_PRESET,
+        help="Couleur de l'objet/carte pour lancer les objets ('FIRE') (defaut: red, ou 'off' pour desactiver)",
+    )
+    parser.add_argument(
+        "--color-min-area",
+        type=int,
+        default=COLOR_MIN_AREA,
+        help=f"Superficie minimale en pixels pour la detection de couleur (defaut: {COLOR_MIN_AREA})",
+    )
+    parser.add_argument(
+        "--color-cooldown",
+        type=float,
+        default=COLOR_COOLDOWN_SECONDS,
+        help=f"Delai minimal en secondes entre 2 lancers d'objets (defaut: {COLOR_COOLDOWN_SECONDS}s)",
+    )
+    parser.add_argument("--port", type=int, default=8000, help="Port OSC de streaming (defaut: 8000)")
+    parser.add_argument("--host", type=str, default="localhost", help="Hote OSC (defaut: localhost)")
+    parser.add_argument("--no-gui", action="store_true", help="Desactiver la fenetre d'affichage OpenCV")
+    return parser.parse_args()
 
 
 
-    # Draw keypoints
-    #for keypoint in detection.keypoints:
-    #  keypoint_px = _normalized_to_pixel_coordinates(keypoint.x, keypoint.y,
-    #                                                width, height)
-    # color, thickness, radius = (0, 255, 0), 2, 2
-    # cv2.circle(annotated_image, keypoint_px, thickness, color, radius)
-    # TODO: comment the previous section
+def compute3DPos(ibe_x: float, ibe_y: float, rec_ipd: float, user_ipd: float = 3.0) -> Tuple[float, float, float]:
+    """Convertit la position 2D (pixels) et l'ecart des yeux en coordonnees 3D (cm)."""
+    z = (fl * user_ipd * 2.0) / max(1.0, rec_ipd)
 
-    #### Part 2: get the position of the eyes and compute the center of the eyes ####
-    # Draw only the keypoints corresponding to the eyes
-    for i in range(2):
-      keypoint = detection.keypoints[i]
-      keypoint_px = _normalized_to_pixel_coordinates(keypoint.x, keypoint.y,
-                                                      width, height)
-      color, thickness, radius = (0, 255, 0), 2, 2
+    cx = FRAME_WIDTH / 2.0
+    cy = FRAME_HEIGHT / 2.0
 
-      if keypoint_px is not None:
-          cv2.circle(annotated_image, keypoint_px, thickness, color, radius)
+    x = ((ibe_x - cx) * z) / fl
+    y = ((ibe_y - cy) * z) / fl
 
+    if screen_height > 0:
+        y = y - (screen_height / 2.0)
 
-    # Draw the center of the eyes with a different color
-    if len(detection.keypoints) >= 2:
-        eye1 = _normalized_to_pixel_coordinates(detection.keypoints[0].x, detection.keypoints[0].y,
-                                                width, height)
-        eye2 = _normalized_to_pixel_coordinates(detection.keypoints[1].x, detection.keypoints[1].y,
-                                                width, height)
-        if eye1 is not None and eye2 is not None:
-            center_x = int((eye1[0] + eye2[0]) / 2)
-            center_y = int((eye1[1] + eye2[1]) / 2)
-            cv2.circle(annotated_image, (center_x, center_y), 3, (0, 0, 255), -1)  # Blue color for the center of the eyes
-
-    # Draw label and score
-    category = detection.categories[0]
-    category_name = category.category_name
-    category_name = '' if category_name is None else category_name
-    probability = round(category.score, 2)
-    result_text = category_name + ' (' + str(probability) + ')'
-    text_location = (MARGIN + bbox.origin_x,
-                     MARGIN + ROW_SIZE + bbox.origin_y)
-    cv2.putText(annotated_image, result_text, text_location, cv2.FONT_HERSHEY_PLAIN,
-                FONT_SIZE, TEXT_COLOR, FONT_THICKNESS)
-
-  return annotated_image
-
-#####################################################################################
-
-######################### Part 4: compute the 3D position ###########################
-
-# convert the 2 position in pixels in the image to 
-# a 3D position in cm in the camera reference frame
-def compute3DPos(ibe_x, ibe_y, rec_ipd):
-    
-    # compute the distance between the head and the camera
-    
-    z = (fl * user_ipd*2) / rec_ipd
-
-    # compute the x and y coordinate in a Yup reference frame
-    
-    cx = frame_width / 2.0
-    cy = frame_height / 2.0
-
-    x = ((ibe_x - cx) * z)/fl
-    y = ((ibe_y - cy) * z)/fl
-
-    # center the reference frame on the center of the screen
-    # (and not on the camera)
-    if screen_heigth > 0:
-        y = y - (screen_heigth / 2.0)
-    
     return (x, y, z)
 
 
+def _normalized_to_pixel_coordinates(
+    normalized_x: float, normalized_y: float, image_width: int, image_height: int
+) -> Union[None, Tuple[int, int]]:
+    """Converts normalized value pair to pixel coordinates."""
+    def is_valid_normalized_value(value: float) -> bool:
+        return (value > 0 or math.isclose(0, value)) and (value < 1 or math.isclose(1, value))
+
+    if not (is_valid_normalized_value(normalized_x) and is_valid_normalized_value(normalized_y)):
+        return None
+    x_px = min(math.floor(normalized_x * image_width), image_width - 1)
+    y_px = min(math.floor(normalized_y * image_height), image_height - 1)
+    return x_px, y_px
 
 
+class FaceData:
+    """Structure contenant toutes les metriques extraites pour un visage detecte."""
 
-################################ main fonction ##############################
-    
+    def __init__(self, det, width: int, height: int, user_ipd: float = 3.0):
+        self.bbox = det.bounding_box
+        self.origin_x = self.bbox.origin_x
+        self.origin_y = self.bbox.origin_y
+        self.width = self.bbox.width
+        self.height = self.bbox.height
+        self.center_x_px = self.origin_x + self.width // 2
+        self.center_y_px = self.origin_y + self.height // 2
+
+        # Keypoints: 0=oeil droit, 1=oeil gauche, 2=nez, 3=bouche
+        kps = det.keypoints
+        self.eye1_px = None
+        self.eye2_px = None
+        if len(kps) >= 2:
+            p0 = _normalized_to_pixel_coordinates(kps[0].x, kps[0].y, width, height)
+            p1 = _normalized_to_pixel_coordinates(kps[1].x, kps[1].y, width, height)
+            if p0 is not None and p1 is not None:
+                # Tri des yeux de gauche a droite sur l'ecran (mode miroir)
+                if p0[0] <= p1[0]:
+                    self.eye1_px, self.eye2_px = p0, p1
+                else:
+                    self.eye1_px, self.eye2_px = p1, p0
+
+        self.nose_px = _normalized_to_pixel_coordinates(kps[2].x, kps[2].y, width, height) if len(kps) > 2 else None
+        self.mouth_px = _normalized_to_pixel_coordinates(kps[3].x, kps[3].y, width, height) if len(kps) > 3 else None
+
+        if self.eye1_px and self.eye2_px:
+            dx = self.eye2_px[0] - self.eye1_px[0]
+            dy = self.eye2_px[1] - self.eye1_px[1]
+            self.ipd_px = math.hypot(dx, dy)
+            self.eye_center_x = (self.eye1_px[0] + self.eye2_px[0]) / 2.0
+            self.eye_center_y = (self.eye1_px[1] + self.eye2_px[1]) / 2.0
+            self.center_x_px = int(self.eye_center_x)
+            self.center_y_px = int(self.eye_center_y)
+            self.pos_x, self.pos_y, self.pos_z = compute3DPos(
+                self.eye_center_x, self.eye_center_y, max(1.0, self.ipd_px), user_ipd
+            )
+            # dy > 0: oeil droit plus bas sur l'ecran -> tete penchee a droite (angle positif)
+            # dy < 0: oeil droit plus haut sur l'ecran -> tete penchee a gauche (angle negatif)
+            self.angle = math.degrees(math.atan2(dy, max(1e-4, dx)))
+        else:
+            self.ipd_px = 0.0
+            self.pos_x, self.pos_y, self.pos_z = 0.0, 0.0, 85.0
+            self.angle = 0.0
+
+    @property
+    def is_valid(self) -> bool:
+        return self.eye1_px is not None and self.eye2_px is not None and self.ipd_px > 10.0
+
+
+class TrackingResults:
+    def __init__(self):
+        self.tracking_results = None
+
+    def get_result(self, result: vision.FaceDetectorResult, output_image: mp.Image, timestamp_ms: int):
+        self.tracking_results = result
+
+
+def draw_hud(
+    frame: np.ndarray,
+    p1: Optional[FaceData],
+    p2: Optional[FaceData],
+    active_mode: str,
+    fps: float,
+    steering_mode: str = "face",
+    color_detector: Optional[ColorCardDetector] = None,
+    card_triggered: bool = False,
+    card_detected: bool = False,
+    card_bbox: Optional[Tuple[int, int, int, int]] = None,
+):
+    """Dessine le HUD moderne en miroir avec zone de direction (P1) et zone de traction (P2)."""
+    h, w, _ = frame.shape
+
+    # 1. En-tete superieur (Mode & FPS)
+    cv2.rectangle(frame, (0, 0), (w, 32), (18, 18, 18), -1)
+    steer_tag = "Inclinaison" if steering_mode == "face" else "Position"
+    mode_text = (
+        f"MODE: DUO (P1: Direction [{steer_tag}] | P2: Vitesse)"
+        if active_mode == "duo"
+        else f"MODE: SOLO (Direction [{steer_tag}] + Vitesse)"
+    )
+    mode_color = (0, 255, 200) if active_mode == "duo" else (0, 255, 120)
+    cv2.putText(frame, mode_text, (15, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.52, mode_color, 2, cv2.LINE_AA)
+    cv2.putText(frame, f"FPS: {fps:.0f}", (w - 95, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 200, 200), 1, cv2.LINE_AA)
+
+    # 2. Ligne de separation centrale en mode Duo
+    if active_mode == "duo":
+        for y_dot in range(35, h - 35, 16):
+            cv2.line(frame, (w // 2, y_dot), (w // 2, y_dot + 8), (70, 70, 70), 1, cv2.LINE_AA)
+
+    # 3. Affichage Joueur 1 (Direction)
+    if steering_mode == "position":
+        if active_mode == "duo":
+            left_line_x = int(DUO_P1_LEFT_THRESHOLD * w)
+            right_line_x = int(DUO_P1_RIGHT_THRESHOLD * w)
+        else:
+            left_line_x = int(SOLO_LEFT_THRESHOLD * w)
+            right_line_x = int(SOLO_RIGHT_THRESHOLD * w)
+
+        if p1 is not None and p1.is_valid:
+            if p1.center_x_px < left_line_x:
+                left_col = (0, 255, 120)
+                right_col = (0, 200, 200)
+                steer_lbl = f"<-- GAUCHE ({p1.center_x_px}px)"
+                steer_clr = (0, 255, 120)
+            elif p1.center_x_px > right_line_x:
+                left_col = (0, 200, 200)
+                right_col = (0, 255, 120)
+                steer_lbl = f"DROITE --> ({p1.center_x_px}px)"
+                steer_clr = (0, 255, 120)
+            else:
+                left_col = (0, 200, 200)
+                right_col = (0, 200, 200)
+                steer_lbl = f"NEUTRE ({p1.center_x_px}px)"
+                steer_clr = (180, 180, 180)
+        else:
+            left_col = (0, 200, 200)
+            right_col = (0, 200, 200)
+            steer_lbl = "NEUTRE"
+            steer_clr = (180, 180, 180)
+
+        # Trace les 2 lignes verticales de seuils
+        cv2.line(frame, (left_line_x, 35), (left_line_x, h - 35), left_col, 2, cv2.LINE_AA)
+        cv2.line(frame, (right_line_x, 35), (right_line_x, h - 35), right_col, 2, cv2.LINE_AA)
+        cv2.putText(frame, "<-- GAUCHE", (max(5, left_line_x - 70), 50), cv2.FONT_HERSHEY_SIMPLEX, 0.40, left_col, 1, cv2.LINE_AA)
+        cv2.putText(frame, "DROITE -->", (min(w - 75, right_line_x + 6), 50), cv2.FONT_HERSHEY_SIMPLEX, 0.40, right_col, 1, cv2.LINE_AA)
+        mid_x = (left_line_x + right_line_x) // 2
+        cv2.putText(frame, "NEUTRE", (mid_x - 22, h - 45), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (180, 180, 180), 1, cv2.LINE_AA)
+
+        if p1 is not None and p1.is_valid:
+            bx, by, bw, bh = p1.origin_x, p1.origin_y, p1.width, p1.height
+            cv2.rectangle(frame, (bx, by), (bx + bw, by + bh), (255, 200, 0), 2)
+            cv2.putText(frame, "P1: POSITION" if active_mode == "duo" else "SOLO", (bx, max(45, by - 8)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 200, 0), 1, cv2.LINE_AA)
+            cv2.circle(frame, (p1.center_x_px, p1.center_y_px), 5, (0, 255, 255), -1)
+            cv2.putText(frame, steer_lbl, (bx, by + bh + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45, steer_clr, 2, cv2.LINE_AA)
+    else:
+        # Mode inclinaison classique
+        if p1 is not None and p1.is_valid:
+            bx, by, bw, bh = p1.origin_x, p1.origin_y, p1.width, p1.height
+            cv2.rectangle(frame, (bx, by), (bx + bw, by + bh), (255, 200, 0), 2)
+            cv2.putText(frame, "P1: INCLINAISON" if active_mode == "duo" else "SOLO", (bx, max(45, by - 8)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 200, 0), 1, cv2.LINE_AA)
+
+            # Yeux et inclinaison
+            cv2.circle(frame, p1.eye1_px, 3, (0, 255, 255), -1)
+            cv2.circle(frame, p1.eye2_px, 3, (0, 255, 255), -1)
+            cv2.line(frame, p1.eye1_px, p1.eye2_px, (0, 255, 200), 2, cv2.LINE_AA)
+
+            # Etat de direction
+            if p1.angle < -DEAD_ZONE_ANGLE_DEG:
+                steer_lbl = f"<-- GAUCHE ({p1.angle:+.1f} deg)"
+                steer_clr = (0, 255, 120)
+            elif p1.angle > DEAD_ZONE_ANGLE_DEG:
+                steer_lbl = f"DROITE --> ({p1.angle:+.1f} deg)"
+                steer_clr = (0, 255, 120)
+            else:
+                steer_lbl = f"NEUTRE ({p1.angle:+.1f} deg)"
+                steer_clr = (180, 180, 180)
+
+            cv2.putText(frame, steer_lbl, (bx, by + bh + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45, steer_clr, 2, cv2.LINE_AA)
+
+
+    # 4. Affichage Joueur 2 (Traction) en mode Duo
+    if active_mode == "duo" and p2 is not None and p2.is_valid:
+        bx, by, bw, bh = p2.origin_x, p2.origin_y, p2.width, p2.height
+        cv2.rectangle(frame, (bx, by), (bx + bw, by + bh), (0, 165, 255), 2)
+        cv2.putText(frame, "P2: VITESSE", (bx, max(45, by - 8)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 165, 255), 1, cv2.LINE_AA)
+
+        # Points yeux et nez/bouche
+        cv2.circle(frame, p2.eye1_px, 3, (0, 200, 255), -1)
+        cv2.circle(frame, p2.eye2_px, 3, (0, 200, 255), -1)
+        if p2.nose_px:
+            cv2.circle(frame, p2.nose_px, 3, (255, 255, 0), -1)
+
+        # Etat de vitesse
+        if p2.pos_z < (POS_Z_MIN + 5.0):
+            spd_lbl = f"ACCELERER ^ ({p2.pos_z:.0f} cm)"
+            spd_clr = (0, 255, 120)
+        elif p2.pos_z > (POS_Z_MAX - 5.0):
+            spd_lbl = f"FREINER v ({p2.pos_z:.0f} cm)"
+            spd_clr = (0, 0, 255)
+        else:
+            spd_lbl = f"ROUE LIBRE ({p2.pos_z:.0f} cm)"
+            spd_clr = (180, 180, 180)
+
+        cv2.putText(frame, spd_lbl, (bx, by + bh + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45, spd_clr, 2, cv2.LINE_AA)
+
+    # 5. Affichage distance en mode Solo
+    elif active_mode == "solo" and p1 is not None and p1.is_valid:
+        if p1.pos_z < (POS_Z_MIN + 5.0):
+            spd_lbl = f"ACCEL ({p1.pos_z:.0f} cm)"
+            spd_clr = (0, 255, 120)
+        elif p1.pos_z > (POS_Z_MAX - 5.0):
+            spd_lbl = f"FREIN ({p1.pos_z:.0f} cm)"
+            spd_clr = (0, 0, 255)
+        else:
+            spd_lbl = f"COAST ({p1.pos_z:.0f} cm)"
+            spd_clr = (180, 180, 180)
+
+        cv2.putText(frame, spd_lbl, (p1.origin_x, p1.origin_y + p1.height + 36),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, spd_clr, 2, cv2.LINE_AA)
+
+    # 6. Detection d'objet colore (FIRE)
+    if color_detector and color_detector.enabled:
+        color_detector.draw_hud_overlay(frame, card_triggered, card_detected, card_bbox)
+
+    # 7. Barre d'aide inferieure
+    steer_help = "Position" if steering_mode == "position" else "Inclinaison"
+    col_str = f" | Objet [{color_detector.preset.upper()}]: FIRE (C: Calib)" if (color_detector and color_detector.enabled) else ""
+    help_text = f"ESC: Quitter | Steer: {steer_help} | Z: Vitesse{col_str}"
+    cv2.putText(
+        frame,
+        help_text,
+        (15, h - 10),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.35,
+        (160, 160, 160),
+        1,
+        cv2.LINE_AA,
+    )
+
+
 def runtracking():
+    args = parse_arguments()
+    user_ipd = args.ipd
+    mode = args.mode
+    steering_mode = args.steering
+    osc_host = args.host
+    osc_port = args.port
+    no_gui = args.no_gui
 
-    print("\nTracking started !!!")
-    print("Hit ESC key to quit...")
-    
-    # infinite loop for processing the video stream
-    while True:
+    color_enabled = (args.color != "off" and COLOR_DETECTION_ENABLED)
+    color_detector = ColorCardDetector(
+        enabled=color_enabled,
+        preset=args.color,
+        min_area=args.color_min_area,
+        max_area=COLOR_MAX_AREA,
+        max_aspect_ratio=COLOR_MAX_ASPECT_RATIO,
+        min_solidity=COLOR_MIN_SOLIDITY,
+        min_extent=COLOR_MIN_EXTENT,
+        cooldown_seconds=args.color_cooldown,
+        pulse_duration=COLOR_PULSE_DURATION,
+        confirm_frames=COLOR_CONFIRM_FRAMES,
+    )
 
-        # add to delay to avoid that the loop run too fast
+    print("\n" + "=" * 65)
+    print("  MCSI SuperTuxKart - Face Tracking Collaboratif & Solo")
+    color_str = f"{args.color.upper()} (Tir actif)" if color_enabled else "DESACTIVE"
+    print(f"  Mode configure : {mode.upper()} | Direction : {steering_mode.upper()} | Objet : {color_str}")
+    print(f"  Distance interpupillaire : {user_ipd * 2.0:.1f} cm (demi-ecart: {user_ipd} cm)")
+    print(f"  Streaming OSC vers {osc_host}:{osc_port}")
+    print("=" * 65 + "\n")
 
-        # read one frame from a camera and get the frame timestamp
-        ret, img_bgr = cap.read()
-        frame_timestamp_ms = int(time.time()*1000 - first_time)
+    clientOSC = OSCClient(osc_host, osc_port)
 
-        # Convert the opencv image to RGB
-        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-        if not ret:
-            continue
-    
-        # Convert the frame received from OpenCV to a MediaPipe’s Image object.
-        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img_rgb) 
+    # Initialisation camera
+    cap = cv2.VideoCapture(0)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
 
-        # Send live image data to perform face detection.
-        # The results are accessible via the `result_callback` provided in
-        # the `FaceDetectorOptions` object.
-        # The face detector must be created with the live stream mode.
-        detector.detect_async(mp_image, frame_timestamp_ms)
+    if not cap.isOpened():
+        print("Erreur : Impossible d'ouvrir le flux webcam.")
+        return
 
-        if res.tracking_results != None:
-            #### Part 2: get the position of the eyes and compute the center of the eyes ####
+    # Initialisation detecteur MediaPipe
+    res = TrackingResults()
+    model_asset_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "blaze_face_short_range.tflite")
+    base_options = python.BaseOptions(model_asset_path=model_asset_path)
+    options = vision.FaceDetectorOptions(
+        base_options=base_options,
+        running_mode=vision.RunningMode.LIVE_STREAM,
+        result_callback=res.get_result,
+    )
+    detector = vision.FaceDetector.create_from_options(options)
 
-            # If a face is detected
-            # Get the biggest face 
-            if len (res.tracking_results.detections) > 0:
-                biggest_face = max(res.tracking_results.detections, 
-                                   key=lambda det: 
-                                   det.bounding_box.width * det.bounding_box.height)
-                
+    first_time = time.time() * 1000.0
+    prev_time = time.time()
+    fps = 30.0
 
-            # Get the position of the two eyes in pixels 
-            if len(res.tracking_results.detections) > 0 and len(biggest_face.keypoints) >=1:
-                eye1 = biggest_face.keypoints[0]
-                eye2 = biggest_face.keypoints[1]
+    print("Tracking demarre ! Appuyez sur ESC pour quitter...\n")
 
-                if eye1 is not None and eye2 is not None:
-                    eye1_px =_normalized_to_pixel_coordinates(eye1.x, eye1.y,
-                                                              int(frame_width), int(frame_height))
-                                        
-                    eye2_px = _normalized_to_pixel_coordinates(eye2.x, eye2.y,
-                                                              int(frame_width), int(frame_height))
+    try:
+        while True:
+            ret, img_bgr = cap.read()
+            if not ret or img_bgr is None:
+                time.sleep(0.01)
+                continue
 
-                if eye1_px is not None and eye2_px is not None:
-                    print("Eye 1:", eye1_px)
-                    print("Eye 2:", eye2_px)
+            # Miroir horizontal : indispensable pour un comportement naturel et intuitif
+            img_bgr = cv2.flip(img_bgr, 1)
 
-                  # If we have a position for the two eyes
-                    # compute the position between the two eyes (in pixels)
-                    eye_center_x = int((eye1_px[0] + eye2_px[0]) / 2)
-                    eye_center_y = int((eye1_px[1] + eye2_px[1]) / 2)
-                    
-                    
-                    eye_center = (int (eye_center_x), int (eye_center_y)) 
+            now = time.time()
+            dt = now - prev_time
+            prev_time = now
+            if dt > 0:
+                fps = 0.9 * fps + 0.1 * (1.0 / dt)
 
-                    print("Eye center:", eye_center)
+            # Detection d'objet colore pour lancer un objet (FIRE)
+            card_triggered, card_detected, card_bbox, card_color = color_detector.detect(img_bgr, now)
+            if card_triggered:
+                clientOSC.send_message(b"/tracker/fire", [1])
 
-                    # compute the interpupillary distance (in pixels)
-                    distance_interpupi= math.sqrt((eye2_px[0] - eye1_px[0])**2 + (eye2_px[1] - eye1_px[1])**2)
+            frame_timestamp_ms = int(now * 1000 - first_time)
 
-                    print ("Distance interpupille", distance_interpupi)
+            # Conversion MediaPipe
+            img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img_rgb)
+            detector.detect_async(mp_image, frame_timestamp_ms)
+
+            # Traitement des visages detectes
+            valid_faces: List[FaceData] = []
+            if res.tracking_results is not None and res.tracking_results.detections:
+                for det in res.tracking_results.detections:
+                    face = FaceData(det, FRAME_WIDTH, FRAME_HEIGHT, user_ipd)
+                    if face.is_valid:
+                        valid_faces.append(face)
+
+            # Tri des visages horizontalement (gauche vers droite sur l'ecran miroir)
+            valid_faces.sort(key=lambda f: f.center_x_px)
+
+            # Determination du mode (Duo vs Solo)
+            p1: Optional[FaceData] = None
+            p2: Optional[FaceData] = None
+
+            if mode == "duo" or (mode == "auto" and len(valid_faces) >= 2):
+                active_mode = "duo"
+                if len(valid_faces) >= 2:
+                    p1 = valid_faces[0]  # Visage gauche : Joueur 1 (Direction)
+                    p2 = valid_faces[1]  # Visage droit : Joueur 2 (Vitesse)
+                elif len(valid_faces) == 1:
+                    p1 = valid_faces[0]  # Un seul visage present en attente du second
+            else:
+                active_mode = "solo"
+                if len(valid_faces) >= 1:
+                    p1 = valid_faces[0]  # Joueur unique : fait tout
+
+            # Envoi des messages OSC
+            if active_mode == "duo" and p1 and p2:
+                # Joueur 1 : Direction (yeux + tete)
+                clientOSC.send_message(b"/tracker/p1/eyes1/pos_xyz", [p1.eye1_px[0], p1.eye1_px[1]])
+                clientOSC.send_message(b"/tracker/p1/eyes2/pos_xyz", [p1.eye2_px[0], p1.eye2_px[1]])
+                clientOSC.send_message(b"/tracker/p1/head/pos_xyz", [p1.pos_x, p1.pos_y, p1.pos_z])
+
+                # Joueur 2 : Vitesse (tete distance z + yeux)
+                clientOSC.send_message(b"/tracker/p2/head/pos_xyz", [p2.pos_x, p2.pos_y, p2.pos_z])
+                clientOSC.send_message(b"/tracker/p2/eyes1/pos_xyz", [p2.eye1_px[0], p2.eye1_px[1]])
+                clientOSC.send_message(b"/tracker/p2/eyes2/pos_xyz", [p2.eye2_px[0], p2.eye2_px[1]])
+
+                # Messages de retro-compatibilite directe
+                clientOSC.send_message(b"/tracker/eyes1/pos_xyz", [p1.eye1_px[0], p1.eye1_px[1]])
+                clientOSC.send_message(b"/tracker/eyes2/pos_xyz", [p1.eye2_px[0], p1.eye2_px[1]])
+                clientOSC.send_message(b"/tracker/head/pos_xyz", [p2.pos_x, p2.pos_y, p2.pos_z])
+
+            elif p1 is not None:
+                # Mode Solo (ou P1 seul)
+                clientOSC.send_message(b"/tracker/eyes1/pos_xyz", [p1.eye1_px[0], p1.eye1_px[1]])
+                clientOSC.send_message(b"/tracker/eyes2/pos_xyz", [p1.eye2_px[0], p1.eye2_px[1]])
+                clientOSC.send_message(b"/tracker/head/pos_xyz", [p1.pos_x, p1.pos_y, p1.pos_z])
+
+                clientOSC.send_message(b"/tracker/p1/eyes1/pos_xyz", [p1.eye1_px[0], p1.eye1_px[1]])
+                clientOSC.send_message(b"/tracker/p1/eyes2/pos_xyz", [p1.eye2_px[0], p1.eye2_px[1]])
+                clientOSC.send_message(b"/tracker/p1/head/pos_xyz", [p1.pos_x, p1.pos_y, p1.pos_z])
+                clientOSC.send_message(b"/tracker/p2/head/pos_xyz", [p1.pos_x, p1.pos_y, p1.pos_z])
+
+            # Affichage graphique
+            if not no_gui:
+                draw_hud(
+                    img_bgr,
+                    p1,
+                    p2,
+                    active_mode,
+                    fps,
+                    steering_mode=steering_mode,
+                    color_detector=color_detector,
+                    card_triggered=card_triggered,
+                    card_detected=card_detected,
+                    card_bbox=card_bbox,
+                )
+                cv2.imshow("SuperTuxKart - Face Tracking Collaboratif", img_bgr)
+
+                key = cv2.waitKey(1) & 0xFF
+                if key == 27:  # ESC
+                    break
+                elif (key == ord('c') or key == ord('C')) and color_detector.enabled:
+                    ok, msg = color_detector.sample_from_center(img_bgr)
+                    print(f"\n[Calibration Couleur] {msg}")
+
+    except KeyboardInterrupt:
+        pass
+    finally:
+        cap.release()
+        cv2.destroyAllWindows()
+        print("\nFace tracking arrete.")
 
 
-                    ###################### Part 4: compute the 3D position ###########################
-                    # compute the 3D position in the reference frame of the screen center
-                    pos_x, pos_y, pos_z = compute3DPos(eye_center_x, eye_center_y, distance_interpupi)
-
-                    print("3D position: " + "{:.2f}".format(pos_x) + " - " 
-                    											+ "{:.2f}".format(pos_y) + " - " 
-                    											+ "{:.2f}".format(pos_z))
-
-                    ################### Part 5: send the head position with OSC ######################
-                    clientOSC.send_message(b'/tracker/eyes1/pos_xyz', [eye1_px[0], eye1_px[1]])
-                    clientOSC.send_message(b'/tracker/eyes2/pos_xyz', [eye2_px[0], eye2_px[1]])
-                    
-                    clientOSC.send_message(b'/tracker/head/pos_xyz', [pos_x, pos_y, pos_z])
-  
-            # Display an image in a window (you can avoid to display the image to improve the performance)
-            annotated_image = mp_image.numpy_view()
-            annotated_image = visualize(annotated_image, res.tracking_results)
-            bgr_annotated_image = cv2.cvtColor(annotated_image, cv2.COLOR_RGB2BGR)
-            cv2.imshow('img', bgr_annotated_image)
-  
-        # Wait for Esc key to stop 
-        k = cv2.waitKey(1) & 0xff
-        if k == 27: 
-               break
-  
-    # release the video stream from the camera
-    #cap.release()
-      
-    # close the associated window 
-    #cv2.destroyAllWindows() 
-
-
-############################ program execution #############################
-            
-runtracking()
+if __name__ == "__main__":
+    runtracking()
