@@ -69,7 +69,7 @@ DEAD_ZONE_Z = 0.20           # Zone morte autour du point de repos
 
 # --- 3. Detection d'Objets Colores (Lancer d'objets / Fire) ---
 COLOR_DETECTION_ENABLED = True
-COLOR_PRESET = "red"            # Presets disponibles : 'red', 'green', 'blue', 'yellow', 'orange', 'custom'
+COLOR_PRESET = "green"            # Presets disponibles : 'red', 'green', 'blue', 'yellow', 'orange', 'custom'
 
 # Plages HSV par defaut pour le mode personnalise ('custom')
 COLOR_CUSTOM_LOWER = (0, 100, 70)
