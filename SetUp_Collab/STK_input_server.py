@@ -199,6 +199,19 @@ def main():
                         joystick.write(e.EV_ABS, e.ABS_Z, brake)
                         # Axe Y (negatif=accel, positif=frein)
                         joystick.write(e.EV_ABS, e.ABS_Y, int(-clamped * 32767))
+
+                        # Active aussi les boutons par defaut de SuperTuxKart (BTN_X = Accel, BTN_Y = Frein)
+                        # pour fonctionner meme si STK a mappe la traction sur des boutons
+                        if clamped > 0.15:
+                            joystick.write(e.EV_KEY, e.BTN_X, 1)
+                            joystick.write(e.EV_KEY, e.BTN_Y, 0)
+                        elif clamped < -0.15:
+                            joystick.write(e.EV_KEY, e.BTN_Y, 1)
+                            joystick.write(e.EV_KEY, e.BTN_X, 0)
+                        else:
+                            joystick.write(e.EV_KEY, e.BTN_X, 0)
+                            joystick.write(e.EV_KEY, e.BTN_Y, 0)
+
                         joystick.syn()
                     elif HAS_KEYBOARD:
                         if clamped > 0.15:
@@ -223,18 +236,22 @@ def main():
                 if data == 'P_ACCELERATE':
                     joystick.write(e.EV_ABS, e.ABS_GAS, 1023)
                     joystick.write(e.EV_ABS, e.ABS_Y, -32767)
+                    joystick.write(e.EV_KEY, e.BTN_X, 1)
                     joystick.syn()
                 elif data == 'R_ACCELERATE':
                     joystick.write(e.EV_ABS, e.ABS_GAS, 0)
                     joystick.write(e.EV_ABS, e.ABS_Y, 0)
+                    joystick.write(e.EV_KEY, e.BTN_X, 0)
                     joystick.syn()
                 elif data == 'P_BRAKE':
                     joystick.write(e.EV_ABS, e.ABS_BRAKE, 1023)
                     joystick.write(e.EV_ABS, e.ABS_Y, 32767)
+                    joystick.write(e.EV_KEY, e.BTN_Y, 1)
                     joystick.syn()
                 elif data == 'R_BRAKE':
                     joystick.write(e.EV_ABS, e.ABS_BRAKE, 0)
                     joystick.write(e.EV_ABS, e.ABS_Y, 0)
+                    joystick.write(e.EV_KEY, e.BTN_Y, 0)
                     joystick.syn()
                 elif data == 'P_LEFT':
                     joystick.write(e.EV_ABS, e.ABS_X, -32767)
@@ -247,39 +264,50 @@ def main():
                     joystick.syn()
                 elif data in ('FIRE', 'P_FIRE'):
                     joystick.write(e.EV_KEY, e.BTN_A, 1)
+                    joystick.write(e.EV_KEY, e.BTN_B, 1)
                     joystick.syn()
                     if data == 'FIRE':
                         time.sleep(0.04)
                         joystick.write(e.EV_KEY, e.BTN_A, 0)
+                        joystick.write(e.EV_KEY, e.BTN_B, 0)
                         joystick.syn()
                 elif data == 'R_FIRE':
                     joystick.write(e.EV_KEY, e.BTN_A, 0)
+                    joystick.write(e.EV_KEY, e.BTN_B, 0)
                     joystick.syn()
                 elif data in ('NITRO', 'P_NITRO'):
                     joystick.write(e.EV_KEY, e.BTN_B, 1)
+                    joystick.write(e.EV_KEY, e.BTN_TL, 1)
                     joystick.syn()
                     if data == 'NITRO':
                         time.sleep(0.04)
                         joystick.write(e.EV_KEY, e.BTN_B, 0)
+                        joystick.write(e.EV_KEY, e.BTN_TL, 0)
                         joystick.syn()
                 elif data == 'R_NITRO':
                     joystick.write(e.EV_KEY, e.BTN_B, 0)
+                    joystick.write(e.EV_KEY, e.BTN_TL, 0)
                     joystick.syn()
                 elif data == 'P_SKIDDING':
                     joystick.write(e.EV_KEY, e.BTN_X, 1)
+                    joystick.write(e.EV_KEY, e.BTN_TR, 1)
                     joystick.syn()
                 elif data == 'R_SKIDDING':
                     joystick.write(e.EV_KEY, e.BTN_X, 0)
+                    joystick.write(e.EV_KEY, e.BTN_TR, 0)
                     joystick.syn()
                 elif data in ('RESCUE', 'P_RESCUE'):
                     joystick.write(e.EV_KEY, e.BTN_Y, 1)
+                    joystick.write(e.EV_KEY, e.BTN_SELECT, 1)
                     joystick.syn()
                     if data == 'RESCUE':
                         time.sleep(0.04)
                         joystick.write(e.EV_KEY, e.BTN_Y, 0)
+                        joystick.write(e.EV_KEY, e.BTN_SELECT, 0)
                         joystick.syn()
                 elif data == 'R_RESCUE':
                     joystick.write(e.EV_KEY, e.BTN_Y, 0)
+                    joystick.write(e.EV_KEY, e.BTN_SELECT, 0)
                     joystick.syn()
                 elif data == 'PAUSE':
                     joystick.write(e.EV_KEY, e.BTN_START, 1)
