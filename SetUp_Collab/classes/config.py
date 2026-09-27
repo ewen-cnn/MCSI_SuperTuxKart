@@ -55,10 +55,6 @@ POS_Z_MIN = 70.0             # Distance cm penche en avant (acceleration max)
 POS_Z_MAX = 105.0            # Distance cm penche en arriere (freinage)
 DEAD_ZONE_Z = 0.20           # Zone morte autour du point de repos
 
-# --- 3. Sauvetage (Rescue) ---
-# Ratio distance nez-bouche / distance inter-yeux pour detecter la bouche ouverte
-MOUTH_OPEN_THRESHOLD = 0.60  # Bouche ouverte (gasp / surprise) declenche RESCUE
-RESCUE_COOLDOWN_S = 2.0      # Temps d'attente mini entre 2 sauvetages
 
 
 def gravity_deviation(ax, ay, az):
@@ -80,7 +76,6 @@ def bind_all(
     p1_eye2=None,
     p1_camera=None,
     p2_camera=None,
-    rescue_state=None,
 ):
     """Associe les messages OSC aux capteurs (compatible solo et duo)."""
 
@@ -116,8 +111,4 @@ def bind_all(
         osc.bind(b'/tracker/p2/head/pos_xyz', lambda *values: p2_camera.pos_x(values[0]))
         osc.bind(b'/tracker/p2/head/pos_xyz', lambda *values: p2_camera.pos_y(values[1]))
         osc.bind(b'/tracker/p2/head/pos_xyz', lambda *values: p2_camera.pos_z(values[2]))
-
-    # Message Sauvetage (Rescue)
-    if rescue_state is not None:
-        osc.bind(b'/tracker/rescue', lambda *values: rescue_state.trigger(values[0] if values else 1))
   
