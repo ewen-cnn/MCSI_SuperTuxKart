@@ -112,7 +112,7 @@ def main():
         "--pwm",
         action="store_true",
         default=False,
-        help="Enable PWM pulsed modulation on steering keys (default: False, solid 100% direct steering)",
+        help="Enable PWM pulsed modulation on steering keys (default: False, solid 100%% direct steering)",
     )
     args = parser.parse_args()
 

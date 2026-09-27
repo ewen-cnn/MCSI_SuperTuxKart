@@ -1,7 +1,6 @@
 import threading, time
 
 class Vector3State:
-
     def __init__(self):
         self._lock = threading.Lock()
         self._x = None
@@ -60,3 +59,28 @@ class CameraState:
             if self._x is None or self._y is None or self._z is None:
                 return 0.0, None, None, float('inf')
             return self._x, self._y, self._z, time.time() - self._last_update
+
+    
+class EyesValues():
+    def __init__(self):
+            self._lock = threading.Lock()
+            self._x = 0.0
+            self._y = None
+            self._last_update = 0.0
+        
+    def pos_x(self, value):
+        with self._lock:
+            self._x = value
+            self._last_update = time.time()
+
+    def pos_y(self, value):
+        with self._lock:
+            self._y = value
+            self._last_update = time.time()
+
+    def snapshot(self):
+        """Retourne (x, y, age du dernier message recu)."""
+        with self._lock:
+            if self._x is None or self._y is None:
+                return None, None, float('inf')
+            return self._x, self._y, time.time() - self._last_update
