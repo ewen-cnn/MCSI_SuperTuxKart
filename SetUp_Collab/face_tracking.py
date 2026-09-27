@@ -40,6 +40,8 @@ from classes.config import (
     FRAME_HEIGHT,
     ANGLE_TETE_MAX,
     DEAD_ZONE_ANGLE_DEG,
+    DEFAULT_Z_NEUTRAL,
+    DEAD_ZONE_Z_CM,
     POS_Z_MIN,
     POS_Z_MAX,
     SOLO_LEFT_THRESHOLD,

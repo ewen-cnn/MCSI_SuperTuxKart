@@ -125,6 +125,11 @@ def main():
         serveur_deja_actif = True
 
     if not serveur_deja_actif:
+        if sys.platform.startswith('linux') and hasattr(os, 'geteuid') and os.geteuid() != 0:
+            print(YELLOW + "\n[INFO] Sur Linux, la simulation clavier de STK_input_server.py requiert les droits root (sudo)." + WHITE)
+            print(YELLOW + "Si le serveur n'arrive pas a demarrer, lancez dans un autre terminal :" + WHITE)
+            print(YELLOW + "  sudo .venv/bin/python SetUp_Collab/STK_input_server.py" + WHITE)
+            print(YELLOW + "Ou utilisez le script tout-en-un : ./launch_game.sh\n" + WHITE)
         cmd_serveur = [sys.executable, os.path.join(ici, 'STK_input_server.py')]
         if debug:
             cmd_serveur.append('-d')
