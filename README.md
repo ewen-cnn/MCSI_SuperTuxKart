@@ -104,17 +104,27 @@ Le script supporte deux modes de direction selon vos préférences :
 
 ---
 
-## 🎨 Détection d'Objets Colorés (`--color`)
+## 🎨 Détection d'Objets Colorés & Tir (`--color`)
 
-Pour tirer des objets en jeu sans appuyer sur le clavier, présentez un objet ou un carton de couleur devant la webcam :
+Pour tirer des objets en jeu (`FIRE`) sans appuyer sur le clavier, présentez un objet ou un carton de couleur devant la webcam :
 
 - **Couleurs prédéfinies :** `--color green` (défaut), `--color red`, `--color blue`, `--color yellow`, `--color orange`.
 - **Désactiver :** `--color off`.
-- **Calibrage instantané en direct (<kbd>C</kbd>) :**
-  Dans la fenêtre webcam, placez votre objet dans le rectangle central et appuyez sur la touche <kbd>C</kbd>. L'algorithme échantillonne automatiquement la couleur et ajuste les seuils HSV à l'éclairage de votre pièce !
+- **Réticule & Calibrage instantané (<kbd>C</kbd>) :**
+  Un réticule central `[ CALIB (C) ]` apparaît à l'écran. Placez votre objet au centre et appuyez sur <kbd>C</kbd>. Une protection anti-teint rejette automatiquement la peau et les lèvres pour éviter tout faux positif !
+- **Réinitialiser (<kbd>R</kbd>) :**
+  Appuyez sur <kbd>R</kbd> pour revenir instantanément au préréglage initial de couleur.
+- **Tir unitaire avec délai de recharge :**
+  La détection génère une impulsion unique par apparition d'objet avec un cooldown de 1.4s. Si vous possédez 3 objets en jeu, vous pouvez désormais les déclencher un par un de manière contrôlée sans les vider tous d'un coup.
 
-Pour le guide complet des réglages de détection de couleur, consultez :
-[`SetUp_Collab/color_detection_guide.md`](SetUp_Collab/color_detection_guide.md).
+---
+
+## 📏 Calibrage de la Distance Neutre (<kbd>Z</kbd>)
+
+Le joueur responsable de la vitesse (accélération / freinage) dispose d'un calibrage dynamique :
+- **Calibrage automatique :** Pendant les 2,5 premières secondes au lancement, la distance moyenne de repos est enregistrée comme référence ($Z$ neutre).
+- **Calibrage à la volée (<kbd>Z</kbd>) :** À tout moment, mettez-vous en position assise confortable et appuyez sur <kbd>Z</kbd> pour définir cette distance comme point zéro.
+- Avancez de $+7\text{ cm}$ par rapport au neutre pour accélérer, reculez de $+7\text{ cm}$ pour freiner, ou restez dans la zone neutre pour la roue libre (*coast*).
 
 ---
 
@@ -125,7 +135,9 @@ Pour vérifier votre cadrage, le flux miroir, la détection des visages et calib
 ```bash
 .venv/bin/python SetUp_Collab/face_tracking.py --steering position --color green
 ```
-- <kbd>C</kbd> : Échantillonner la couleur au centre de l'écran.
+- <kbd>Z</kbd> : Calibrer la position neutre de distance (accélération/freinage).
+- <kbd>C</kbd> : Échantillonner la couleur dans le réticule central.
+- <kbd>R</kbd> : Réinitialiser la couleur par défaut.
 - <kbd>ESC</kbd> ou <kbd>Q</kbd> : Quitter.
 
 ---
