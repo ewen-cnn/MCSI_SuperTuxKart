@@ -6,8 +6,16 @@
 import sys
 import socket
 import threading
-import time
-import keyboard
+try:
+    import keyboard
+except ImportError as err:
+    print(f"\n\033[91m[ERREUR] Impossible d'initialiser 'keyboard' : {err}\033[0m")
+    print("\033[93mSur Linux, la simulation du clavier nécessite les privilèges root.\033[0m")
+    print("\033[93mLancez ce serveur avec sudo :\033[0m")
+    print("  sudo .venv/bin/python SetUp_Collab/STK_input_server.py")
+    print("\033[93mOu utilisez le lanceur global :\033[0m")
+    print("  ./launch_game.sh\n")
+    sys.exit(1)
 
 ###############################################################################
 ## Global vars
