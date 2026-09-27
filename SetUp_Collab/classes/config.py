@@ -38,6 +38,10 @@ GRAVITY = 9.81
 # PARAMETRES DE CONTROLE DU KART (Configurables ici pour tout le projet)
 # ===========================================================================
 
+# Dimensions standard de capture camera (16:9)
+FRAME_WIDTH = 640
+FRAME_HEIGHT = 360
+
 # --- 1. Direction (Steering) ---
 ANGLE_TETE_MAX = 20.0        # Degres d'inclinaison max pour braquer a 100%
 DEAD_ZONE_ANGLE_DEG = 5.0    # Zone neutre centrale en degres (+/- 5 degres)
@@ -45,9 +49,15 @@ DEAD_ZONE_X_FACE = DEAD_ZONE_ANGLE_DEG / ANGLE_TETE_MAX
 INVERT_TETE = False          # Inverser si le kart tourne dans le mauvais sens
 
 # Mode position horizontale ('position') :
-POS_X_MIN = -23.0            # cm vers la gauche
-POS_X_MAX = 23.0             # cm vers la droite
-DEAD_ZONE_X_POS = 0.20       # Ratio zone morte
+DELTA_X_MAX = 8.0            # cm d'ecart lateral par rapport au repos pour braquer a 100%
+DEAD_ZONE_X_POS = 0.25       # Ratio zone morte (+/- 2 cm de zone neutre)
+TURN_SPAN_PX = 60.0          # Pixels au-dela de la ligne de seuil pour braquer a 100%
+
+# Lignes de seuils visuels de direction pour le HUD (coordonnees normalisees [0.0 - 1.0]) :
+SOLO_LEFT_THRESHOLD = 0.44
+SOLO_RIGHT_THRESHOLD = 0.56
+DUO_P1_LEFT_THRESHOLD = 0.19
+DUO_P1_RIGHT_THRESHOLD = 0.31
 
 # --- 2. Traction (Acceleration & Freinage) ---
 # cz est la distance en cm entre le visage et la camera

@@ -35,10 +35,16 @@ from mediapipe.tasks.python import vision
 # Import project configuration parameters
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from classes.config import (
+    FRAME_WIDTH,
+    FRAME_HEIGHT,
     ANGLE_TETE_MAX,
     DEAD_ZONE_ANGLE_DEG,
     POS_Z_MIN,
     POS_Z_MAX,
+    SOLO_LEFT_THRESHOLD,
+    SOLO_RIGHT_THRESHOLD,
+    DUO_P1_LEFT_THRESHOLD,
+    DUO_P1_RIGHT_THRESHOLD,
 )
 
 # Focal length in pixels
@@ -47,9 +53,6 @@ fl = 654.0
 # Screen height in cm
 screen_height = 21.0
 
-# Frame dimensions
-FRAME_WIDTH = 640
-FRAME_HEIGHT = 360
 
 
 def parse_arguments():
@@ -67,10 +70,17 @@ def parse_arguments():
         default="auto",
         help="Mode de suivi: 'auto' (adapte 1 ou 2 visages), 'duo' (P1 tourne, P2 accelere), 'solo' (1 joueur fait tout)",
     )
+    parser.add_argument(
+        "--steering",
+        choices=["face", "position"],
+        default="face",
+        help="Mode de direction: 'face' (inclinaison tete) ou 'position' (position horizontale cx avec lignes de seuil)",
+    )
     parser.add_argument("--port", type=int, default=8000, help="Port OSC de streaming (defaut: 8000)")
     parser.add_argument("--host", type=str, default="localhost", help="Hote OSC (defaut: localhost)")
     parser.add_argument("--no-gui", action="store_true", help="Desactiver la fenetre d'affichage OpenCV")
     return parser.parse_args()
+
 
 
 def compute3DPos(ibe_x: float, ibe_y: float, rec_ipd: float, user_ipd: float = 3.0) -> Tuple[float, float, float]:
@@ -138,6 +148,8 @@ class FaceData:
             self.ipd_px = math.hypot(dx, dy)
             self.eye_center_x = (self.eye1_px[0] + self.eye2_px[0]) / 2.0
             self.eye_center_y = (self.eye1_px[1] + self.eye2_px[1]) / 2.0
+            self.center_x_px = int(self.eye_center_x)
+            self.center_y_px = int(self.eye_center_y)
             self.pos_x, self.pos_y, self.pos_z = compute3DPos(
                 self.eye_center_x, self.eye_center_y, max(1.0, self.ipd_px), user_ipd
             )
@@ -168,15 +180,21 @@ def draw_hud(
     p2: Optional[FaceData],
     active_mode: str,
     fps: float,
+    steering_mode: str = "face",
 ):
     """Dessine le HUD moderne en miroir avec zone de direction (P1) et zone de traction (P2)."""
     h, w, _ = frame.shape
 
     # 1. En-tete superieur (Mode & FPS)
     cv2.rectangle(frame, (0, 0), (w, 32), (18, 18, 18), -1)
-    mode_text = "MODE: DUO (P1: Direction | P2: Vitesse)" if active_mode == "duo" else "MODE: SOLO (Direction + Vitesse)"
+    steer_tag = "Inclinaison" if steering_mode == "face" else "Position"
+    mode_text = (
+        f"MODE: DUO (P1: Direction [{steer_tag}] | P2: Vitesse)"
+        if active_mode == "duo"
+        else f"MODE: SOLO (Direction [{steer_tag}] + Vitesse)"
+    )
     mode_color = (0, 255, 200) if active_mode == "duo" else (0, 255, 120)
-    cv2.putText(frame, mode_text, (15, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.55, mode_color, 2, cv2.LINE_AA)
+    cv2.putText(frame, mode_text, (15, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.52, mode_color, 2, cv2.LINE_AA)
     cv2.putText(frame, f"FPS: {fps:.0f}", (w - 95, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 200, 200), 1, cv2.LINE_AA)
 
     # 2. Ligne de separation centrale en mode Duo
@@ -185,29 +203,77 @@ def draw_hud(
             cv2.line(frame, (w // 2, y_dot), (w // 2, y_dot + 8), (70, 70, 70), 1, cv2.LINE_AA)
 
     # 3. Affichage Joueur 1 (Direction)
-    if p1 is not None and p1.is_valid:
-        bx, by, bw, bh = p1.origin_x, p1.origin_y, p1.width, p1.height
-        cv2.rectangle(frame, (bx, by), (bx + bw, by + bh), (255, 200, 0), 2)
-        cv2.putText(frame, "P1: DIRECTION" if active_mode == "duo" else "SOLO", (bx, max(45, by - 8)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 200, 0), 1, cv2.LINE_AA)
-
-        # Yeux et inclinaison
-        cv2.circle(frame, p1.eye1_px, 3, (0, 255, 255), -1)
-        cv2.circle(frame, p1.eye2_px, 3, (0, 255, 255), -1)
-        cv2.line(frame, p1.eye1_px, p1.eye2_px, (0, 255, 200), 2, cv2.LINE_AA)
-
-        # Etat de direction
-        if p1.angle < -DEAD_ZONE_ANGLE_DEG:
-            steer_lbl = f"<-- GAUCHE ({p1.angle:+.1f} deg)"
-            steer_clr = (0, 255, 120)
-        elif p1.angle > DEAD_ZONE_ANGLE_DEG:
-            steer_lbl = f"DROITE --> ({p1.angle:+.1f} deg)"
-            steer_clr = (0, 255, 120)
+    if steering_mode == "position":
+        if active_mode == "duo":
+            left_line_x = int(DUO_P1_LEFT_THRESHOLD * w)
+            right_line_x = int(DUO_P1_RIGHT_THRESHOLD * w)
         else:
-            steer_lbl = f"NEUTRE ({p1.angle:+.1f} deg)"
+            left_line_x = int(SOLO_LEFT_THRESHOLD * w)
+            right_line_x = int(SOLO_RIGHT_THRESHOLD * w)
+
+        if p1 is not None and p1.is_valid:
+            if p1.center_x_px < left_line_x:
+                left_col = (0, 255, 120)
+                right_col = (0, 200, 200)
+                steer_lbl = f"<-- GAUCHE ({p1.center_x_px}px)"
+                steer_clr = (0, 255, 120)
+            elif p1.center_x_px > right_line_x:
+                left_col = (0, 200, 200)
+                right_col = (0, 255, 120)
+                steer_lbl = f"DROITE --> ({p1.center_x_px}px)"
+                steer_clr = (0, 255, 120)
+            else:
+                left_col = (0, 200, 200)
+                right_col = (0, 200, 200)
+                steer_lbl = f"NEUTRE ({p1.center_x_px}px)"
+                steer_clr = (180, 180, 180)
+        else:
+            left_col = (0, 200, 200)
+            right_col = (0, 200, 200)
+            steer_lbl = "NEUTRE"
             steer_clr = (180, 180, 180)
 
-        cv2.putText(frame, steer_lbl, (bx, by + bh + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45, steer_clr, 2, cv2.LINE_AA)
+        # Trace les 2 lignes verticales de seuils
+        cv2.line(frame, (left_line_x, 35), (left_line_x, h - 35), left_col, 2, cv2.LINE_AA)
+        cv2.line(frame, (right_line_x, 35), (right_line_x, h - 35), right_col, 2, cv2.LINE_AA)
+        cv2.putText(frame, "<-- GAUCHE", (max(5, left_line_x - 70), 50), cv2.FONT_HERSHEY_SIMPLEX, 0.40, left_col, 1, cv2.LINE_AA)
+        cv2.putText(frame, "DROITE -->", (min(w - 75, right_line_x + 6), 50), cv2.FONT_HERSHEY_SIMPLEX, 0.40, right_col, 1, cv2.LINE_AA)
+        mid_x = (left_line_x + right_line_x) // 2
+        cv2.putText(frame, "NEUTRE", (mid_x - 22, h - 45), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (180, 180, 180), 1, cv2.LINE_AA)
+
+        if p1 is not None and p1.is_valid:
+            bx, by, bw, bh = p1.origin_x, p1.origin_y, p1.width, p1.height
+            cv2.rectangle(frame, (bx, by), (bx + bw, by + bh), (255, 200, 0), 2)
+            cv2.putText(frame, "P1: POSITION" if active_mode == "duo" else "SOLO", (bx, max(45, by - 8)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 200, 0), 1, cv2.LINE_AA)
+            cv2.circle(frame, (p1.center_x_px, p1.center_y_px), 5, (0, 255, 255), -1)
+            cv2.putText(frame, steer_lbl, (bx, by + bh + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45, steer_clr, 2, cv2.LINE_AA)
+    else:
+        # Mode inclinaison classique
+        if p1 is not None and p1.is_valid:
+            bx, by, bw, bh = p1.origin_x, p1.origin_y, p1.width, p1.height
+            cv2.rectangle(frame, (bx, by), (bx + bw, by + bh), (255, 200, 0), 2)
+            cv2.putText(frame, "P1: INCLINAISON" if active_mode == "duo" else "SOLO", (bx, max(45, by - 8)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 200, 0), 1, cv2.LINE_AA)
+
+            # Yeux et inclinaison
+            cv2.circle(frame, p1.eye1_px, 3, (0, 255, 255), -1)
+            cv2.circle(frame, p1.eye2_px, 3, (0, 255, 255), -1)
+            cv2.line(frame, p1.eye1_px, p1.eye2_px, (0, 255, 200), 2, cv2.LINE_AA)
+
+            # Etat de direction
+            if p1.angle < -DEAD_ZONE_ANGLE_DEG:
+                steer_lbl = f"<-- GAUCHE ({p1.angle:+.1f} deg)"
+                steer_clr = (0, 255, 120)
+            elif p1.angle > DEAD_ZONE_ANGLE_DEG:
+                steer_lbl = f"DROITE --> ({p1.angle:+.1f} deg)"
+                steer_clr = (0, 255, 120)
+            else:
+                steer_lbl = f"NEUTRE ({p1.angle:+.1f} deg)"
+                steer_clr = (180, 180, 180)
+
+            cv2.putText(frame, steer_lbl, (bx, by + bh + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45, steer_clr, 2, cv2.LINE_AA)
+
 
     # 4. Affichage Joueur 2 (Traction) en mode Duo
     if active_mode == "duo" and p2 is not None and p2.is_valid:
@@ -267,13 +333,14 @@ def runtracking():
     args = parse_arguments()
     user_ipd = args.ipd
     mode = args.mode
+    steering_mode = args.steering
     osc_host = args.host
     osc_port = args.port
     no_gui = args.no_gui
 
     print("\n" + "=" * 65)
     print("  MCSI SuperTuxKart - Face Tracking Collaboratif & Solo")
-    print(f"  Mode configure : {mode.upper()}")
+    print(f"  Mode configure : {mode.upper()} | Direction : {steering_mode.upper()}")
     print(f"  Distance interpupillaire : {user_ipd * 2.0:.1f} cm (demi-ecart: {user_ipd} cm)")
     print(f"  Streaming OSC vers {osc_host}:{osc_port}")
     print("=" * 65 + "\n")
@@ -387,7 +454,7 @@ def runtracking():
 
             # Affichage graphique
             if not no_gui:
-                draw_hud(img_bgr, p1, p2, active_mode, fps)
+                draw_hud(img_bgr, p1, p2, active_mode, fps, steering_mode=steering_mode)
                 cv2.imshow("SuperTuxKart - Face Tracking Collaboratif", img_bgr)
 
                 key = cv2.waitKey(1) & 0xFF
