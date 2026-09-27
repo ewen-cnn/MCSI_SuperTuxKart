@@ -90,7 +90,6 @@ def main():
     p1_eye2 = EyesValues()
     p1_camera = CameraState()
     p2_camera = CameraState()
-    rescue_state = TriggerState()
     osc = OSCThreadServer()
     steering_pwm = ContinuousCommand()
     
@@ -106,7 +105,6 @@ def main():
         p1_eye2=p1_eye2,
         p1_camera=p1_camera,
         p2_camera=p2_camera,
-        rescue_state=rescue_state,
     )
     print()
     print(f'STK client v2 started (Mode jeu: {play_mode.upper()}, Direction: {steering_mode.upper()})')
@@ -176,12 +174,7 @@ def main():
                 kart.set_nitro(False)
                 nitro_jusqua = None
 
-            # --- 1. Sauvetage (Rescue) : bouche ouverte ou secousse gyro ---
-            if rescue_state.pop_trigger():
-                kart.rescue()
-                if debug:
-                    print(GREEN + '\tbouche ouverte -> RESCUE' + WHITE)
-
+            # --- 1. Sauvetage (Rescue) : secousse gyro (carte Arduino) ---
             gx, gy, gz, gage = gyr.snapshot()
             if gx is not None and gage <= SENSOR_TIMEOUT:
                 if shake_detector.updategyr(gx, now):
@@ -225,8 +218,8 @@ def main():
                         kart.set_steering('NONE')
                     else:
                         nx = normalize(angle - angle_repos, -ANGLE_TETE_MAX, ANGLE_TETE_MAX)
-                        direction = zone(-nx, DEAD_ZONE_X_FACE, 'LEFT', 'RIGHT')
-                        niveau = intensity(-nx, DEAD_ZONE_X_FACE) ** EXPO
+                        direction = zone(nx, DEAD_ZONE_X_FACE, 'LEFT', 'RIGHT')
+                        niveau = intensity(nx, DEAD_ZONE_X_FACE) ** EXPO
                         if steering_pwm.pressed(niveau, now):
                             kart.set_steering(direction)
                         else:
@@ -242,8 +235,8 @@ def main():
 
                 if cx is not None and gage <= SENSOR_TIMEOUT:
                     nx = normalize(cx, POS_X_MIN, POS_X_MAX)
-                    direction = zone(-nx, DEAD_ZONE_X_POS, 'LEFT', 'RIGHT')
-                    niveau = intensity(-nx, DEAD_ZONE_X_POS) ** EXPO
+                    direction = zone(nx, DEAD_ZONE_X_POS, 'LEFT', 'RIGHT')
+                    niveau = intensity(nx, DEAD_ZONE_X_POS) ** EXPO
                     if steering_pwm.pressed(niveau, now):
                         kart.set_steering(direction)
                     else:

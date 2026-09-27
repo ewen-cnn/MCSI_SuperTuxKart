@@ -39,7 +39,6 @@ from classes.config import (
     DEAD_ZONE_ANGLE_DEG,
     POS_Z_MIN,
     POS_Z_MAX,
-    MOUTH_OPEN_THRESHOLD,
 )
 
 # Focal length in pixels
@@ -118,34 +117,37 @@ class FaceData:
 
         # Keypoints: 0=oeil droit, 1=oeil gauche, 2=nez, 3=bouche
         kps = det.keypoints
-        self.eye1_px = _normalized_to_pixel_coordinates(kps[0].x, kps[0].y, width, height) if len(kps) > 0 else None
-        self.eye2_px = _normalized_to_pixel_coordinates(kps[1].x, kps[1].y, width, height) if len(kps) > 1 else None
+        self.eye1_px = None
+        self.eye2_px = None
+        if len(kps) >= 2:
+            p0 = _normalized_to_pixel_coordinates(kps[0].x, kps[0].y, width, height)
+            p1 = _normalized_to_pixel_coordinates(kps[1].x, kps[1].y, width, height)
+            if p0 is not None and p1 is not None:
+                # Tri des yeux de gauche a droite sur l'ecran (mode miroir)
+                if p0[0] <= p1[0]:
+                    self.eye1_px, self.eye2_px = p0, p1
+                else:
+                    self.eye1_px, self.eye2_px = p1, p0
+
         self.nose_px = _normalized_to_pixel_coordinates(kps[2].x, kps[2].y, width, height) if len(kps) > 2 else None
         self.mouth_px = _normalized_to_pixel_coordinates(kps[3].x, kps[3].y, width, height) if len(kps) > 3 else None
 
         if self.eye1_px and self.eye2_px:
-            self.ipd_px = math.hypot(self.eye2_px[0] - self.eye1_px[0], self.eye2_px[1] - self.eye1_px[1])
+            dx = self.eye2_px[0] - self.eye1_px[0]
+            dy = self.eye2_px[1] - self.eye1_px[1]
+            self.ipd_px = math.hypot(dx, dy)
             self.eye_center_x = (self.eye1_px[0] + self.eye2_px[0]) / 2.0
             self.eye_center_y = (self.eye1_px[1] + self.eye2_px[1]) / 2.0
             self.pos_x, self.pos_y, self.pos_z = compute3DPos(
                 self.eye_center_x, self.eye_center_y, max(1.0, self.ipd_px), user_ipd
             )
-            self.angle = math.degrees(
-                math.atan2(self.eye2_px[1] - self.eye1_px[1], self.eye2_px[0] - self.eye1_px[0])
-            )
+            # dy > 0: oeil droit plus bas sur l'ecran -> tete penchee a droite (angle positif)
+            # dy < 0: oeil droit plus haut sur l'ecran -> tete penchee a gauche (angle negatif)
+            self.angle = math.degrees(math.atan2(dy, max(1e-4, dx)))
         else:
             self.ipd_px = 0.0
             self.pos_x, self.pos_y, self.pos_z = 0.0, 0.0, 85.0
             self.angle = 0.0
-
-        # Detection ouverture de la bouche pour le sauvetage (Rescue)
-        if self.nose_px and self.mouth_px and self.ipd_px > 0:
-            mouth_dist = math.hypot(self.mouth_px[0] - self.nose_px[0], self.mouth_px[1] - self.nose_px[1])
-            self.mouth_ratio = mouth_dist / self.ipd_px
-        else:
-            self.mouth_ratio = 0.0
-
-        self.mouth_open = self.mouth_ratio >= MOUTH_OPEN_THRESHOLD
 
     @property
     def is_valid(self) -> bool:
@@ -165,10 +167,9 @@ def draw_hud(
     p1: Optional[FaceData],
     p2: Optional[FaceData],
     active_mode: str,
-    is_rescue: bool,
     fps: float,
 ):
-    """Dessine le HUD moderne avec zone de direction (P1) et zone de traction (P2)."""
+    """Dessine le HUD moderne en miroir avec zone de direction (P1) et zone de traction (P2)."""
     h, w, _ = frame.shape
 
     # 1. En-tete superieur (Mode & FPS)
@@ -185,7 +186,6 @@ def draw_hud(
 
     # 3. Affichage Joueur 1 (Direction)
     if p1 is not None and p1.is_valid:
-        # Bounding box cyan
         bx, by, bw, bh = p1.origin_x, p1.origin_y, p1.width, p1.height
         cv2.rectangle(frame, (bx, by), (bx + bw, by + bh), (255, 200, 0), 2)
         cv2.putText(frame, "P1: DIRECTION" if active_mode == "duo" else "SOLO", (bx, max(45, by - 8)),
@@ -221,9 +221,6 @@ def draw_hud(
         cv2.circle(frame, p2.eye2_px, 3, (0, 200, 255), -1)
         if p2.nose_px:
             cv2.circle(frame, p2.nose_px, 3, (255, 255, 0), -1)
-        if p2.mouth_px:
-            m_clr = (0, 0, 255) if p2.mouth_open else (0, 255, 0)
-            cv2.circle(frame, p2.mouth_px, 4 if p2.mouth_open else 2, m_clr, -1)
 
         # Etat de vitesse
         if p2.pos_z < (POS_Z_MIN + 5.0):
@@ -253,18 +250,10 @@ def draw_hud(
         cv2.putText(frame, spd_lbl, (p1.origin_x, p1.origin_y + p1.height + 36),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, spd_clr, 2, cv2.LINE_AA)
 
-    # 6. Banniere Sauvetage (Rescue)
-    if is_rescue:
-        banner_y = h // 2 - 20
-        cv2.rectangle(frame, (w // 2 - 190, banner_y), (w // 2 + 190, banner_y + 45), (0, 0, 200), -1)
-        cv2.rectangle(frame, (w // 2 - 190, banner_y), (w // 2 + 190, banner_y + 45), (0, 255, 255), 2)
-        cv2.putText(frame, "RESCUE ACTIVE ! (Bouche)", (w // 2 - 170, banner_y + 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
-
-    # 7. Barre d'aide inferieure
+    # 6. Barre d'aide inferieure
     cv2.putText(
         frame,
-        "ESC: Quitter | Incliner tete: Tourner | Avancer/Reculer: Vitesse | Ouvrir bouche: Rescue",
+        "ESC: Quitter | Incliner tete: Tourner | Avancer/Reculer: Vitesse",
         (15, h - 10),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.36,
@@ -325,6 +314,9 @@ def runtracking():
                 time.sleep(0.01)
                 continue
 
+            # Miroir horizontal : indispensable pour un comportement naturel et intuitif
+            img_bgr = cv2.flip(img_bgr, 1)
+
             now = time.time()
             dt = now - prev_time
             prev_time = now
@@ -346,13 +338,12 @@ def runtracking():
                     if face.is_valid:
                         valid_faces.append(face)
 
-            # Tri des visages horizontalement (gauche vers droite)
+            # Tri des visages horizontalement (gauche vers droite sur l'ecran miroir)
             valid_faces.sort(key=lambda f: f.center_x_px)
 
             # Determination du mode (Duo vs Solo)
             p1: Optional[FaceData] = None
             p2: Optional[FaceData] = None
-            is_rescue = False
 
             if mode == "duo" or (mode == "auto" and len(valid_faces) >= 2):
                 active_mode = "duo"
@@ -365,12 +356,6 @@ def runtracking():
                 active_mode = "solo"
                 if len(valid_faces) >= 1:
                     p1 = valid_faces[0]  # Joueur unique : fait tout
-
-            # Sauvetage si la bouche est ouverte
-            if p1 and p1.mouth_open:
-                is_rescue = True
-            if p2 and p2.mouth_open:
-                is_rescue = True
 
             # Envoi des messages OSC
             if active_mode == "duo" and p1 and p2:
@@ -400,12 +385,9 @@ def runtracking():
                 clientOSC.send_message(b"/tracker/p1/head/pos_xyz", [p1.pos_x, p1.pos_y, p1.pos_z])
                 clientOSC.send_message(b"/tracker/p2/head/pos_xyz", [p1.pos_x, p1.pos_y, p1.pos_z])
 
-            # Sauvetage OSC
-            clientOSC.send_message(b"/tracker/rescue", [1 if is_rescue else 0])
-
             # Affichage graphique
             if not no_gui:
-                draw_hud(img_bgr, p1, p2, active_mode, is_rescue, fps)
+                draw_hud(img_bgr, p1, p2, active_mode, fps)
                 cv2.imshow("SuperTuxKart - Face Tracking Collaboratif", img_bgr)
 
                 key = cv2.waitKey(1) & 0xFF

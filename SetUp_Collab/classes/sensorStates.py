@@ -84,31 +84,3 @@ class EyesValues():
             if self._x is None or self._y is None:
                 return None, None, float('inf')
             return self._x, self._y, time.time() - self._last_update
-
-
-class TriggerState:
-    """Conteneur thread-safe pour les declencheurs d'evenements (ex: RESCUE)."""
-    def __init__(self):
-        self._lock = threading.Lock()
-        self._active = False
-        self._last_update = 0.0
-
-    def trigger(self, value=1):
-        with self._lock:
-            self._active = bool(value and float(value) > 0.0)
-            if self._active:
-                self._last_update = time.time()
-
-    def snapshot(self):
-        """Retourne (est_actif, age_depuis_declenchement)."""
-        with self._lock:
-            return self._active, time.time() - self._last_update
-
-    def pop_trigger(self, max_age=0.6):
-        """Consomme le declencheur une seule fois s'il est recent."""
-        with self._lock:
-            if self._active and (time.time() - self._last_update <= max_age):
-                self._active = False
-                return True
-            return False
-
