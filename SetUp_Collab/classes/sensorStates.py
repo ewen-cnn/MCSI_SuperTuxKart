@@ -1,4 +1,5 @@
 import threading, time
+from typing import Tuple
 
 class Vector3State:
     def __init__(self):

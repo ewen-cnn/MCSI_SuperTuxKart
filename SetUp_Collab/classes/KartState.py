@@ -1,4 +1,6 @@
-from STK_collab_input import GREEN, WHITE, BLUE
+GREEN = '\033[92m'
+WHITE = '\x1b[0m'
+BLUE = '\033[94m'
 
 ###############################################################################
 ## Representation de l'etat du kart
