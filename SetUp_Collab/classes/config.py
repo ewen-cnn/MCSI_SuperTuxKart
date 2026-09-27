@@ -67,6 +67,28 @@ DEAD_ZONE_Z = 0.20           # Zone morte autour du point de repos
 
 
 
+# --- 3. Detection d'Objets Colores (Lancer d'objets / Fire) ---
+COLOR_DETECTION_ENABLED = True
+COLOR_PRESET = "red"            # Presets disponibles : 'red', 'green', 'blue', 'yellow', 'orange', 'custom'
+
+# Plages HSV par defaut pour le mode personnalise ('custom')
+COLOR_CUSTOM_LOWER = (0, 100, 70)
+COLOR_CUSTOM_UPPER = (10, 255, 255)
+
+# Filtres geometriques pour eliminer les faux positifs (murs, vetements, bruit)
+COLOR_MIN_AREA = 300            # Superficie minimale en pixels (evite le bruit de fond)
+COLOR_MAX_AREA = 45000          # Superficie maximale en pixels (evite tout l'arriere-plan)
+COLOR_MAX_ASPECT_RATIO = 3.5    # Rapport longueur/largeur max (rejette les lignes fines)
+COLOR_MIN_SOLIDITY = 0.65       # Compacite contour/enveloppe convexe (rejette formes creuses)
+COLOR_MIN_EXTENT = 0.35         # Remplissage par rapport au rectangle englobant
+
+# Filtrage temporel & Anti-rebond (Debounce)
+COLOR_COOLDOWN_SECONDS = 1.2    # Temps d'attente mini entre 2 tirs consecutifs (en secondes)
+COLOR_PULSE_DURATION = 0.20     # Duree d'activation de l'impulsion OSC FIRE (en secondes)
+COLOR_CONFIRM_FRAMES = 2        # Nombre d'images consecutives requises pour valider la detection
+
+
+
 def gravity_deviation(ax, ay, az):
     """Ecart entre la norme de l'acceleration et la gravite (m/s2).
 
@@ -86,6 +108,7 @@ def bind_all(
     p1_eye2=None,
     p1_camera=None,
     p2_camera=None,
+    fire_trigger=None,
 ):
     """Associe les messages OSC aux capteurs (compatible solo et duo)."""
 
@@ -121,4 +144,9 @@ def bind_all(
         osc.bind(b'/tracker/p2/head/pos_xyz', lambda *values: p2_camera.pos_x(values[0]))
         osc.bind(b'/tracker/p2/head/pos_xyz', lambda *values: p2_camera.pos_y(values[1]))
         osc.bind(b'/tracker/p2/head/pos_xyz', lambda *values: p2_camera.pos_z(values[2]))
+
+    # Message de lancer d'objet (FIRE) par detection de carte/couleur
+    if fire_trigger is not None:
+        osc.bind(b'/tracker/fire', lambda *values: fire_trigger.trigger(values[0] if values else 1))
+
   

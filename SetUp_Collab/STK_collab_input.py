@@ -61,10 +61,17 @@ def main():
         default='auto',
         help="Mode de jeu : 'auto' (1 ou 2 joueurs selon visages), 'duo' (P1 tourne, P2 vitesse), 'solo' (1 joueur fait tout)",
     )
+    parser.add_argument(
+        '--color',
+        choices=['red', 'green', 'blue', 'yellow', 'orange', 'custom', 'off'],
+        default=COLOR_PRESET,
+        help="Couleur de l'objet/carte pour lancer les objets ('FIRE') (defaut: red, ou 'off' pour desactiver)",
+    )
     args = parser.parse_args()
     debug = args.debug
     steering_mode = args.steering
     play_mode = args.mode
+    color_mode = args.color
 
     sender = STKSender(STK_SERVER_ADDRESS, debug=debug)
     kart = KartState(sender, debug=debug)
@@ -77,6 +84,7 @@ def main():
     p1_eye2 = EyesValues()
     p1_camera = CameraState()
     p2_camera = CameraState()
+    fire_trigger = TriggerState()
     osc = OSCThreadServer()
     steering_pwm = ContinuousCommand()
     
@@ -92,9 +100,11 @@ def main():
         p1_eye2=p1_eye2,
         p1_camera=p1_camera,
         p2_camera=p2_camera,
+        fire_trigger=fire_trigger,
     )
     print()
-    print(f'STK client v2 started (Mode jeu: {play_mode.upper()}, Direction: {steering_mode.upper()})')
+    color_tag = f", Objet: {color_mode.upper()}" if color_mode != "off" else ""
+    print(f'STK client v2 started (Mode jeu: {play_mode.upper()}, Direction: {steering_mode.upper()}{color_tag})')
 
     # Lance le serveur et le face tracking avec compatibilite multi-plateforme.
     ici = os.path.dirname(os.path.abspath(__file__))
@@ -126,6 +136,7 @@ def main():
         os.path.join(ici, 'face_tracking.py'),
         '--mode', play_mode,
         '--steering', steering_mode,
+        '--color', color_mode,
     ]
     tracking = subprocess.Popen(cmd_tracking, cwd=ici, **extra_flags)
     
@@ -165,6 +176,10 @@ def main():
             if nitro_jusqua and now >= nitro_jusqua:
                 kart.set_nitro(False)
                 nitro_jusqua = None
+
+            # --- 0. Lancer d'objet (FIRE) : carte / objet colore detecte ---
+            if fire_trigger.consume():
+                kart.fire()
 
             # --- 1. Sauvetage (Rescue) : secousse gyro (carte Arduino) ---
             gx, gy, gz, gage = gyr.snapshot()
