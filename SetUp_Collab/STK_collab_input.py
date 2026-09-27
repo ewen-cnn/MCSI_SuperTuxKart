@@ -41,23 +41,10 @@ SEUIL_CONTRACTION = 40      # a regler apres mesure
 SEUIL_RELACHEMENT = 20      # plus bas que le precedent : hysteresis
 SENSOR_TIMEOUT = 0.50       # sans message d'un capteur -> capteur eteint
 
-ANGLE_TETE_MAX = 20.0      # degres d'inclinaison pour braquer a fond
 EXPO           = 2.0       # 1.0 = lineaire ; 2.0 = doux au centre, franc aux extremes
-INVERT_TETE    = False     # a basculer si le kart tourne a l'envers
-
-DEAD_ZONE_X_POS  = 0.20
-DEAD_ZONE_X_FACE = 10.0 / ANGLE_TETE_MAX
-DEAD_ZONE_X      = DEAD_ZONE_X_FACE
-DEAD_ZONE_Y      = 0.20
-DEAD_ZONE_Z      = 0.25
-
-POS_X_MIN, POS_X_MAX = -23.0 , 23.0
-POS_Y_MIN, POS_Y_MAX = -23.0 , 23.0
-POS_Z_MIN, POS_Z_MAX = 80.0, 100.0    # cm : a mesurer avec --calib
-
-SKID_KICKOFF = 0.15 
-SKID_INTO_MAX = 0.7     # braquage maxi DANS le sens du virage pendant la glisse
-LOOP_HZ = 120      
+SKID_KICKOFF   = 0.15 
+SKID_INTO_MAX  = 0.7       # braquage maxi DANS le sens du virage pendant la glisse
+LOOP_HZ        = 120      
 
 def main():
     parser = argparse.ArgumentParser(description="STK Collab Input Controller")
@@ -134,7 +121,12 @@ def main():
     else:
         print("Serveur STK d'entrees deja actif sur le port 6006.")
 
-    cmd_tracking = [sys.executable, os.path.join(ici, 'face_tracking.py'), '--mode', play_mode]
+    cmd_tracking = [
+        sys.executable,
+        os.path.join(ici, 'face_tracking.py'),
+        '--mode', play_mode,
+        '--steering', steering_mode,
+    ]
     tracking = subprocess.Popen(cmd_tracking, cwd=ici, **extra_flags)
     
     muscle_contracte = False
@@ -227,18 +219,44 @@ def main():
                 else:
                     kart.set_steering('NONE')      # visage perdu : on relache
             else:
-                # Mode position : deplacement horizontal de la tete (cx)
+                # Mode position : deplacement horizontal du visage par rapport aux lignes de seuils
                 if is_duo_actif:
-                    cx, cy, cz_p1, gage = p1_camera.snapshot()
+                    left_thresh_ratio = DUO_P1_LEFT_THRESHOLD
+                    right_thresh_ratio = DUO_P1_RIGHT_THRESHOLD
+                    e1x, e1y, a1 = p1_e1x, p1_e1y, p1_age1
+                    e2x, e2y, a2 = p1_e2x, p1_e2y, p1_age2
+                    c_x, c_y, c_z, c_age = p1_camera.snapshot()
                 else:
-                    cx, cy, cz_p1, gage = camera.snapshot()
+                    left_thresh_ratio = SOLO_LEFT_THRESHOLD
+                    right_thresh_ratio = SOLO_RIGHT_THRESHOLD
+                    e1x, e1y, a1 = eye1.snapshot()
+                    e2x, e2y, a2 = eye2.snapshot()
+                    c_x, c_y, c_z, c_age = camera.snapshot()
 
-                if cx is not None and gage <= SENSOR_TIMEOUT:
-                    nx = normalize(cx, POS_X_MIN, POS_X_MAX)
-                    direction = zone(nx, DEAD_ZONE_X_POS, 'LEFT', 'RIGHT')
-                    niveau = intensity(nx, DEAD_ZONE_X_POS) ** EXPO
-                    if steering_pwm.pressed(niveau, now):
-                        kart.set_steering(direction)
+                left_thresh_px = left_thresh_ratio * FRAME_WIDTH
+                right_thresh_px = right_thresh_ratio * FRAME_WIDTH
+
+                head_x = None
+                if e1x is not None and e2x is not None and max(a1, a2) <= SENSOR_TIMEOUT:
+                    head_x = (e1x + e2x) / 2.0
+                elif c_x is not None and c_age <= SENSOR_TIMEOUT and c_z is not None and c_z > 0:
+                    head_x = (FRAME_WIDTH / 2.0) + (c_x * 654.0 / c_z)
+
+                if head_x is not None:
+                    if head_x < left_thresh_px:
+                        delta = left_thresh_px - head_x
+                        niveau = min(1.0, max(0.0, delta / max(1.0, TURN_SPAN_PX))) ** EXPO
+                        if steering_pwm.pressed(niveau, now):
+                            kart.set_steering('LEFT')
+                        else:
+                            kart.set_steering('NONE')
+                    elif head_x > right_thresh_px:
+                        delta = head_x - right_thresh_px
+                        niveau = min(1.0, max(0.0, delta / max(1.0, TURN_SPAN_PX))) ** EXPO
+                        if steering_pwm.pressed(niveau, now):
+                            kart.set_steering('RIGHT')
+                        else:
+                            kart.set_steering('NONE')
                     else:
                         kart.set_steering('NONE')
                 else:
