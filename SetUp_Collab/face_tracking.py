@@ -541,7 +541,6 @@ def runtracking():
                 clientOSC.send_message(b"/tracker/p1/eyes1/pos_xyz", [p1.eye1_px[0], p1.eye1_px[1]])
                 clientOSC.send_message(b"/tracker/p1/eyes2/pos_xyz", [p1.eye2_px[0], p1.eye2_px[1]])
                 clientOSC.send_message(b"/tracker/p1/head/pos_xyz", [p1.pos_x, p1.pos_y, p1.pos_z])
-                clientOSC.send_message(b"/tracker/p2/head/pos_xyz", [p1.pos_x, p1.pos_y, p1.pos_z])
 
             # Affichage graphique
             if not no_gui:

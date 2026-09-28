@@ -86,4 +86,3 @@ class KartState:
         if self.steering == 'NONE' and self.throttle == 'NONE':
             return 'immobile'
         return '{} + {}'.format(self.steering, self.throttle)
-
