@@ -11,6 +11,8 @@ import subprocess
 import argparse
 from serial.tools import list_ports       
 
+from classes.outils import *
+from classes.config import *
 from classes.sensorStates import *
 from classes.KartState import *
 from classes.actionDetector import *
@@ -19,32 +21,7 @@ from collections import deque
 from STK_Sender import *
 from oscpy.server import OSCThreadServer
 
-###############################################################################
-## Global vars
-GREEN   = '\033[92m'
-WHITE   = '\x1b[0m'
-BLUE    = '\033[94m'
-YELLOW  = '\033[93m'
-RED     = '\033[91m'
-
-# --- Reseau -----------------------------------------------------------------
-STK_SERVER_ADDRESS = ('localhost', 6006)    # STK_input_server.py
-OSC_LISTEN_IP      = '0.0.0.0'              # 0.0.0.0 = toutes les interfaces
-OSC_LISTEN_PORT    = 8000                   # port a saisir dans MultiSense Osc
-
-SERIAL_PORT = 'COM6'                  # port serie a saisir dans MultiSense Serial
-BAUDRATE= 115200
-TIMEOUT=0.1
-
-CAPTEURS = { 'vibrationSensor', 'MuscleSensor' }
-SEUIL_CONTRACTION = 40      # a regler apres mesure
-SEUIL_RELACHEMENT = 20      # plus bas que le precedent : hysteresis
-SENSOR_TIMEOUT = 0.50       # sans message d'un capteur -> capteur eteint
-
-EXPO           = 2.0       # 1.0 = lineaire ; 2.0 = doux au centre, franc aux extremes
-SKID_KICKOFF   = 0.15 
-SKID_INTO_MAX  = 0.7       # braquage maxi DANS le sens du virage pendant la glisse
-LOOP_HZ        = 120      
+import math 
 
 def main():
     parser = argparse.ArgumentParser(description="STK Collab Input Controller")
@@ -84,7 +61,8 @@ def main():
     p1_eye2 = EyesValues()
     p1_camera = CameraState()
     p2_camera = CameraState()
-    fire_trigger = TriggerState(cooldown=1.4)
+    fire_event = TriggerState(cooldown=COLOR_COOLDOWN_SECONDS)       # rempli par le thread OSC
+    fire_key = HoldCommand(sender, 'P_FIRE', 'R_FIRE', FIRE_HOLD) 
     z_neutral_state = FloatState(default=DEFAULT_Z_NEUTRAL)
     osc = OSCThreadServer()
     steering_pwm = ContinuousCommand()
@@ -101,7 +79,7 @@ def main():
         p1_eye2=p1_eye2,
         p1_camera=p1_camera,
         p2_camera=p2_camera,
-        fire_trigger=fire_trigger,
+        fire_trigger=fire_event,
         z_neutral=z_neutral_state,
     )
     print()
@@ -125,11 +103,6 @@ def main():
         serveur_deja_actif = True
 
     if not serveur_deja_actif:
-        if sys.platform.startswith('linux') and hasattr(os, 'geteuid') and os.geteuid() != 0:
-            print(YELLOW + "\n[INFO] Sur Linux, la simulation clavier de STK_input_server.py requiert les droits root (sudo)." + WHITE)
-            print(YELLOW + "Si le serveur n'arrive pas a demarrer, lancez dans un autre terminal :" + WHITE)
-            print(YELLOW + "  sudo .venv/bin/python SetUp_Collab/STK_input_server.py" + WHITE)
-            print(YELLOW + "Ou utilisez le script tout-en-un : ./launch_game.sh\n" + WHITE)
         cmd_serveur = [sys.executable, os.path.join(ici, 'STK_input_server.py')]
         if debug:
             cmd_serveur.append('-d')
@@ -152,8 +125,6 @@ def main():
     debut_calib = None
     echantillons = []
     nitro_jusqua = None
-    skid_started_at = 0.0
-    skid_direction = 'NONE'
 
     # --- Port serie : optionnel ---
     serialPort = None
@@ -185,8 +156,12 @@ def main():
                 nitro_jusqua = None
 
             # --- 0. Lancer d'objet (FIRE) : carte / objet colore detecte ---
-            if fire_trigger.consume():
-                kart.fire()
+            if fire_event.consume():
+                fire_key.trigger(now)
+            fire_key.update(now)          # à chaque tour, sinon la touche ne se relâche jamais
+
+            # dans le finally, à côté de kart.release_all()
+            fire_key.release_now()
 
             # --- 1. Sauvetage (Rescue) : secousse gyro (carte Arduino) ---
             gx, gy, gz, gage = gyr.snapshot()

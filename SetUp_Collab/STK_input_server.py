@@ -5,17 +5,7 @@
 ## Global libs
 import sys
 import socket
-import threading
-try:
-    import keyboard
-except ImportError as err:
-    print(f"\n\033[91m[ERREUR] Impossible d'initialiser 'keyboard' : {err}\033[0m")
-    print("\033[93mSur Linux, la simulation du clavier nécessite les privilèges root.\033[0m")
-    print("\033[93mLancez ce serveur avec sudo :\033[0m")
-    print("  sudo .venv/bin/python SetUp_Collab/STK_input_server.py")
-    print("\033[93mOu utilisez le lanceur global :\033[0m")
-    print("  ./launch_game.sh\n")
-    sys.exit(1)
+import keyboard
 
 ###############################################################################
 ## Global vars
@@ -32,41 +22,28 @@ address     = ('localhost', 6006)
 sock        = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.bind(address)
 
-def _hold_and_release(key_name, hold_seconds):
-    try:
-        keyboard.press(key_name)
-        time.sleep(hold_seconds)
-        keyboard.release(key_name)
-    except Exception as err:
-        print(f"Erreur robust_tap({key_name}): {err}")
-
-def robust_tap(key_name, hold_seconds=0.06):
-    """Maintient la touche pendant 60 ms dans un thread pour garantir sa prise en compte sans bloquer le serveur."""
-    t = threading.Thread(target=_hold_and_release, args=(key_name, hold_seconds), daemon=True)
-    t.start()
-
 #list of tuples: (received command, keyboard key, keyboard func )
 bindings    = [ ['UP', 'up', keyboard.press_and_release],
                 ['DOWN', 'down', keyboard.press_and_release],
                 ['LEFT', 'left', keyboard.press_and_release],
                 ['RIGHT', 'right', keyboard.press_and_release],
-                ['SELECT', 'enter', robust_tap],
-                ['CANCEL', 'backspace', robust_tap],
-                ['BACK', 'backspace', robust_tap],
-                ['FIRE', 'space', robust_tap],
+                ['SELECT', 'enter', keyboard.press_and_release],
+                ['CANCEL', 'backspace', keyboard.press_and_release],
+                ['BACK', 'backspace', keyboard.press_and_release],
+                ['FIRE', 'space', keyboard.press_and_release],
                 ['P_FIRE', 'space', keyboard.press],
                 ['R_FIRE', 'space', keyboard.release],
-                ['NITRO', 'n', robust_tap],
+                ['NITRO', 'n', keyboard.press_and_release],
                 ['P_NITRO', 'n', keyboard.press],
                 ['R_NITRO', 'n', keyboard.release],
                 ['P_SKIDDING', 'v', keyboard.press],
                 ['R_SKIDDING', 'v', keyboard.release],
                 ['P_LOOKBACK', 'b', keyboard.press],
                 ['R_LOOKBACK', 'b', keyboard.release],
-                ['RESCUE', 'backspace', robust_tap],
+                ['RESCUE', 'backspace', keyboard.press_and_release],
                 ['P_RESCUE', 'backspace', keyboard.press],
                 ['R_RESCUE', 'backspace', keyboard.release],
-                ['PAUSE', 'escape', robust_tap],
+                ['PAUSE', 'escape', keyboard.press_and_release],
                 ['P_UP', 'up', keyboard.press],
                 ['R_UP', 'up', keyboard.release],
                 ['P_DOWN', 'down', keyboard.press],
