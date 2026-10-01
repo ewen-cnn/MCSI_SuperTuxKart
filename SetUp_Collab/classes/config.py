@@ -61,7 +61,7 @@ DEAD_ZONE_Z = 0.20              # Zone morte normalisee
 
 # --- 3. Detection d'Objets Colores (Lancer d'objets / Fire) ---
 COLOR_DETECTION_ENABLED = True
-COLOR_PRESET = "red"            # Presets disponibles : 'red', 'green', 'blue', 'yellow', 'orange', 'custom'
+COLOR_PRESET = "green"            # Presets disponibles : 'red', 'green', 'blue', 'yellow', 'orange', 'custom'
 
 # Plages HSV par defaut pour le mode personnalise ('custom')
 COLOR_CUSTOM_LOWER = (0, 100, 70)
@@ -94,9 +94,9 @@ SHAKE_MIN_SAMPLES     = 3     # nb d'echantillons rapides dans la fenetre
 SHAKE_MIN_REVERSALS   = 2     # nb d'inversions de sens : c'est le va-et-vient
 RESCUE_COOLDOWN       = 2.00  # une secousse = un seul RESCUE
 SHAKE_LOCKOUT         = 1.00  # apres un shake, on ignore l'inclinaison
-
+GYR_X_SHAKE_THRESHOLD = 4.0   # rad/s (~230 deg/s)
 CONTINUOUS_PERIOD = 0.05   # duree d'un cycle pressed + released (s)
 
-FIRE_HOLD        = 0.12     # maintien de la touche espace (s)
-RESCUE_HOLD      = 0.12     # maintien de la touche retour arriere (s)
-NITRO_HOLD       = 0.12     # maintien de la touche nitro (s)
+FIRE_HOLD        = 0.8     # maintien de la touche espace (s)
+RESCUE_HOLD      = 0.8     # maintien de la touche retour arriere (s)
+NITRO_HOLD       = 0.8     # maintien de la touche nitro (s)
