@@ -36,6 +36,45 @@ class ShakeDetector:
         self._last_rescue = 0.0
         self._previous_cx = None
 
+    def updategyr(self, gx, now):
+        """A appeler une fois par iteration. Retourne True sur une secousse."""
+        if gx is None:
+            return False
+        
+        self._history.append((now, gx))
+
+        # On ne garde que la fenetre glissante.
+        while self._history and now - self._history[0][0] > SHAKE_WINDOW:
+            self._history.popleft()
+
+        # Periode refractaire : une secousse dure ~1 s et produirait sinon
+        # une rafale de RESCUE.
+        if now - self._last_rescue < RESCUE_COOLDOWN:
+            return False
+
+        # Criteres 1 et 2 : des rotations rapides, et en nombre.
+        signes = [1 if v >= 0 else -1
+                for _, v in self._history
+                if v is not None and abs(v) > GYR_X_SHAKE_THRESHOLD]
+        if len(signes) < SHAKE_MIN_SAMPLES:
+            return False
+
+        # Critere 3 : le sens doit s'inverser (va-et-vient).
+        inversions = sum(1 for a, b in zip(signes, signes[1:]) if a != b)
+        if inversions < SHAKE_MIN_REVERSALS:
+            return False
+
+        self._last_rescue = now
+        self._history.clear()
+        return True
+
+
+
+    def __init__(self):
+        self._history = deque()
+        self._last_rescue = 0.0
+        self._previous_cx = None
+
     def updatecamera(self, cx, now):
         """Retourne True lorsqu'une secousse rapide gauche-droite est détectée."""
 

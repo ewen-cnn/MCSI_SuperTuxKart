@@ -63,6 +63,7 @@ def main():
     p2_camera = CameraState()
     fire_event = TriggerState(cooldown=COLOR_COOLDOWN_SECONDS)       # rempli par le thread OSC
     fire_key = HoldCommand(sender, 'P_FIRE', 'R_FIRE', FIRE_HOLD) 
+    rescue_button = HoldCommand(sender, 'P_RESCUE', 'R_RESCUE', RESCUE_HOLD)
     z_neutral_state = FloatState(default=DEFAULT_Z_NEUTRAL)
     osc = OSCThreadServer()
     steering_pwm = ContinuousCommand()
@@ -165,9 +166,13 @@ def main():
 
             # --- 1. Sauvetage (Rescue) : secousse gyro (carte Arduino) ---
             gx, gy, gz, gage = gyr.snapshot()
-            if gx is not None and gage <= SENSOR_TIMEOUT:
-                if shake_detector.updategyr(gx, now):
-                    kart.rescue()
+            if shake_detector.updategyr(gx, now):
+                rescue_button.trigger(now)
+                if debug:
+                    print(GREEN + '\tsecousse -> RESCUE' + WHITE)
+            rescue_button.update(now)
+            
+                
 
             # --- 2. Resolution du mode actif (Duo vs Solo) ------------------
             p1_e1x, p1_e1y, p1_age1 = p1_eye1.snapshot()
