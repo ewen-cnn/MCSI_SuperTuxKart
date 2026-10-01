@@ -82,6 +82,7 @@ Un seul joueur contrôle la totalité du kart :
 - Direction avec la tête.
 - Accélération / freinage en s'approchant ou s'éloignant de la webcam.
 - Tir d'objets avec la carte colorée.
+L'objectif de ce mode est de pouvoir tester l'entièreté du code en étant seul.   
 
 ### 3. Mode Automatique (`--mode auto`, défaut)
 Bascule automatiquement en **Duo** lorsque 2 visages sont détectés, et repasse en **Solo** si une seule personne est présente.
@@ -141,27 +142,3 @@ Pour vérifier votre cadrage, le flux miroir, la détection des visages et calib
 - <kbd>ESC</kbd> ou <kbd>Q</kbd> : Quitter.
 
 ---
-
-## 📁 Structure du Projet
-
-```text
-├── launch_game.sh                # Script de lancement tout-en-un (Serveur + STK)
-├── README.md                     # Documentation du projet
-├── SetUp_Collab/                 # Module de contrôle collaboratif actif
-│   ├── STK_collab_input.py       # Récepteur OSC, logique de jeu et Arduino
-│   ├── STK_input_server.py       # Serveur UDP récepteur injectant les touches
-│   ├── face_tracking.py          # Vision MediaPipe BlazeFace, HUD et OSC
-│   ├── STK_Sender.py             # Client d'envoi UDP vers le serveur
-│   ├── color_detection_guide.md  # Guide de calibration des couleurs
-│   ├── blaze_face_short_range.tflite # Modèle MediaPipe Face
-│   ├── classes/
-│   │   ├── config.py             # Constantes, seuils, dimensions et OSC
-│   │   ├── colorDetector.py      # Détecteur robuste de cartes colorées
-│   │   ├── actionDetector.py     # Détection des secousses et gestes
-│   │   ├── KartState.py          # État du kart et commandes
-│   │   └── sensorStates.py       # Structures d'état et écouteurs OSC
-│   └── main/                     # Code Arduino capteurs physiques
-│       ├── main.ino              # Firmware Arduino (muscle + vibration)
-│       └── Sensors/              # Classes C++ des capteurs
-└── SetUp_Performance/            # Versions de référence antérieures
-```
