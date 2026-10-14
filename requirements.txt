@@ -1,0 +1,6 @@
+keyboard
+mediapipe
+numpy
+opencv-python
+oscpy
+pyserial
