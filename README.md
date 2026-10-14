@@ -6,7 +6,28 @@ Le système permet de piloter un kart en **Solo** (un seul joueur gère tout ave
 
 ---
 
-## 🎮 Résumé des Contrôles
+Projet réalisé en binôme dans le module MCSI (Master SIIA, ENIB).
+
+## Architecture
+
+```text
+ Webcam ──► face_tracking / colorDetector (MediaPipe, OpenCV) ─┐
+                                                              ├─► KartState ─► actions ─► UDP :6006 ─► STK_input_server ─► touches clavier ─► SuperTuxKart
+ Arduino (EMG A0, vibration D2, IMU) ──► port série ──────────┘
+```
+
+- **Fusion multimodale** : chaque source (visage, couleur, capteurs) met à jour un état commun du kart (`classes/KartState.py`) ; les actions sont ensuite traduites en appuis/relâchements de touches.
+- **Découplage par UDP** : la détection et l'injection clavier tournent dans deux processus séparés. Seul le serveur d'injection a besoin des droits root (module `keyboard` sous Linux).
+- **Calibrage à chaud** : position neutre de la tête, distance de référence et couleur de la carte se recalibrent pendant la partie.
+
+Le dépôt contient deux dispositifs :
+
+| Dossier | Entrées | Usage |
+| --- | --- | --- |
+| `SetUp_Collab/` | Webcam (visage + objet coloré) et capteurs Arduino | Contrôle solo ou à deux joueurs, décrit ci-dessous |
+| `SetUp_Performance/` | Smartphone via l'application MultiSense (pad tactile + accéléromètre, protocole OSC sur le port 8000) | Pilotage par inclinaison du téléphone |
+
+## Résumé des Contrôles
 
 | Action dans STK | Touche Clavier | Source de Contrôle |
 | :--- | :--- | :--- |
@@ -20,21 +41,24 @@ Le système permet de piloter un kart en **Solo** (un seul joueur gère tout ave
 
 ---
 
-## 🚀 Démarrage Rapide
+## Démarrage Rapide
 
 ### Prérequis
-Assurez-vous que l'environnement virtuel Python est prêt et activé :
+
+Linux, Python 3.10 à 3.12 (versions supportées par MediaPipe), une webcam et [SuperTuxKart](https://supertuxkart.net/) (testé avec la version 1.2). La carte Arduino est optionnelle : sans elle, les commandes caméra fonctionnent seules.
+
 ```bash
-source .venv/bin/activate
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
 ```
 
----
+Le croquis Arduino est dans `SetUp_Collab/main/main.ino`. La carte est détectée automatiquement au lancement grâce à son identifiant USB Arduino (VID `0x2341`).
 
 ### Méthode 1 : Lancement Tout-en-Un (Recommandé)
 
 1. **Terminal 1 — Lancer le jeu et le serveur d'entrées :**
    ```bash
-   ./launch_game.sh
+   STK_RUN=~/SuperTuxKart-1.2-linux/run_game.sh ./launch_game.sh
    ```
    *(Entrez votre mot de passe `sudo` si demandé, nécessaire pour l'injection des touches sous Linux).*
 
@@ -61,7 +85,7 @@ Si vous préférez lancer chaque élément séparément :
 sudo .venv/bin/python SetUp_Collab/STK_input_server.py
 
 # Terminal 2 : SuperTuxKart
-/home/paulo/SIIA/MCSI/SuperTuxKart-1.2-linux/run_game.sh
+"$STK_RUN"   # chemin vers SuperTuxKart, par ex. ~/SuperTuxKart-1.2-linux/run_game.sh
 
 # Terminal 3 : Contrôleur de tracking collaboratif
 .venv/bin/python SetUp_Collab/STK_collab_input.py --mode duo --steering position --color green
@@ -69,7 +93,7 @@ sudo .venv/bin/python SetUp_Collab/STK_input_server.py
 
 ---
 
-## 👥 Modes de Jeu
+## Modes de Jeu
 
 ### 1. Mode Duo Collaboratif (`--mode duo`)
 Deux joueurs se tiennent côte à côte devant la webcam :
@@ -89,7 +113,7 @@ Bascule automatiquement en **Duo** lorsque 2 visages sont détectés, et repasse
 
 ---
 
-## 🎯 Options de Direction (`--steering`)
+## Options de Direction (`--steering`)
 
 Le script supporte deux modes de direction selon vos préférences :
 
@@ -105,7 +129,7 @@ Le script supporte deux modes de direction selon vos préférences :
 
 ---
 
-## 🎨 Détection d'Objets Colorés & Tir (`--color`)
+## Détection d'Objets Colorés & Tir (`--color`)
 
 Pour tirer des objets en jeu (`FIRE`) sans appuyer sur le clavier, présentez un objet ou un carton de couleur devant la webcam :
 
@@ -120,7 +144,7 @@ Pour tirer des objets en jeu (`FIRE`) sans appuyer sur le clavier, présentez un
 
 ---
 
-## 📏 Calibrage de la Distance Neutre (<kbd>Z</kbd>)
+## Calibrage de la Distance Neutre (<kbd>Z</kbd>)
 
 Le joueur responsable de la vitesse (accélération / freinage) dispose d'un calibrage dynamique :
 - **Calibrage automatique :** Pendant les 2,5 premières secondes au lancement, la distance moyenne de repos est enregistrée comme référence ($Z$ neutre).
@@ -129,7 +153,7 @@ Le joueur responsable de la vitesse (accélération / freinage) dispose d'un cal
 
 ---
 
-## 🧪 Tester Uniquement la Caméra (Sans le Jeu)
+## Tester Uniquement la Caméra (Sans le Jeu)
 
 Pour vérifier votre cadrage, le flux miroir, la détection des visages et calibrer votre carte de couleur sans lancer SuperTuxKart :
 
@@ -142,3 +166,7 @@ Pour vérifier votre cadrage, le flux miroir, la détection des visages et calib
 - <kbd>ESC</kbd> ou <kbd>Q</kbd> : Quitter.
 
 ---
+
+## Licence
+
+[MIT](LICENSE)
